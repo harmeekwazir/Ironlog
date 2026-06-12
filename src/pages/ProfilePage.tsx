@@ -66,13 +66,23 @@ export function ProfilePage() {
         <div className="grid grid-cols-2 gap-3">
           <label className="bg-iron-900 rounded-3xl border border-iron-800 p-4 space-y-2">
             <div className="text-iron-400 text-xs uppercase tracking-wide">Weight (kg)</div>
-            <input value={weightKg} onChange={(e) => updateProfile({ weightKg: Number(e.target.value) || 0 })}
-              type="number" min={0} className="w-full rounded-2xl bg-iron-950 border border-iron-800 px-3 py-3 text-white outline-none" />
+            <input
+              value={weightKg === 0 ? '' : weightKg}
+              onChange={(e) => updateProfile({ weightKg: e.target.value === '' ? 0 : Number(e.target.value) })}
+              type="number"
+              min={0}
+              className="w-full rounded-2xl bg-iron-950 border border-iron-800 px-3 py-3 text-white outline-none"
+            />
           </label>
           <label className="bg-iron-900 rounded-3xl border border-iron-800 p-4 space-y-2">
             <div className="text-iron-400 text-xs uppercase tracking-wide">Height (cm)</div>
-            <input value={heightCm} onChange={(e) => updateProfile({ heightCm: Number(e.target.value) || 0 })}
-              type="number" min={0} className="w-full rounded-2xl bg-iron-950 border border-iron-800 px-3 py-3 text-white outline-none" />
+            <input
+              value={heightCm === 0 ? '' : heightCm}
+              onChange={(e) => updateProfile({ heightCm: e.target.value === '' ? 0 : Number(e.target.value) })}
+              type="number"
+              min={0}
+              className="w-full rounded-2xl bg-iron-950 border border-iron-800 px-3 py-3 text-white outline-none"
+            />
           </label>
         </div>
 

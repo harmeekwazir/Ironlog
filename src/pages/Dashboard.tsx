@@ -113,7 +113,13 @@ export function Dashboard() {
               <p className="text-iron-400 text-xs uppercase tracking-wide">Body metrics</p>
               <p className="text-white text-lg font-black mt-2">{profile.goal}</p>
             </div>
-            <div className="rounded-3xl bg-volt-400/10 px-3 py-2 text-volt-300 text-xs font-semibold">Update profile</div>
+            <button
+              type="button"
+              onClick={() => setPage('profile')}
+              className="rounded-3xl bg-volt-400/10 px-3 py-2 text-volt-300 text-xs font-semibold transition-colors hover:bg-volt-400/20 hover:text-white"
+            >
+              Update profile
+            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-3 mt-4">
