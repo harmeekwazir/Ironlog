@@ -89,8 +89,13 @@ export function ProfilePage() {
         <div className="grid grid-cols-2 gap-3">
           <label className="bg-iron-900 rounded-3xl border border-iron-800 p-4 space-y-2">
             <div className="text-iron-400 text-xs uppercase tracking-wide">Age</div>
-            <input value={age} onChange={(e) => updateProfile({ age: Number(e.target.value) || 0 })}
-              type="number" min={0} className="w-full rounded-2xl bg-iron-950 border border-iron-800 px-3 py-3 text-white outline-none" />
+            <input
+              value={age === 0 ? '' : age}
+              onChange={(e) => updateProfile({ age: e.target.value === '' ? 0 : Number(e.target.value) })}
+              type="number"
+              min={0}
+              className="w-full rounded-2xl bg-iron-950 border border-iron-800 px-3 py-3 text-white outline-none"
+            />
           </label>
           <label className="bg-iron-900 rounded-3xl border border-iron-800 p-4 space-y-2">
             <div className="text-iron-400 text-xs uppercase tracking-wide">Activity</div>
