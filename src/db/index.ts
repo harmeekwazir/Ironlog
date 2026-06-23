@@ -1,11 +1,12 @@
 import Dexie, { type Table } from 'dexie';
-import type { Workout, Exercise, PersonalRecord, WorkoutTemplate } from '../types';
+import type { Workout, Exercise, PersonalRecord, WorkoutTemplate, ReadinessCheck } from '../types';
 
 class IronLogDB extends Dexie {
   workouts!: Table<Workout>;
   exercises!: Table<Exercise>;
   personalRecords!: Table<PersonalRecord>;
   templates!: Table<WorkoutTemplate>;
+  readiness!: Table<ReadinessCheck>;
 
   constructor() {
     super('IronLogDB');
@@ -14,6 +15,13 @@ class IronLogDB extends Dexie {
       exercises: 'id, name, category, isCustom',
       personalRecords: 'id, exerciseId, type, achievedAt',
       templates: 'id, name, createdAt',
+    });
+    this.version(2).stores({
+      workouts: 'id, startedAt, completedAt, isTemplate',
+      exercises: 'id, name, category, isCustom',
+      personalRecords: 'id, exerciseId, type, achievedAt',
+      templates: 'id, name, createdAt, lastUsed',
+      readiness: 'id, date, createdAt',
     });
   }
 }

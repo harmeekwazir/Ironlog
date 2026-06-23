@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Workout, WorkoutExercise, WorkoutSet } from '../types';
-import { generateId, calcWorkoutVolume } from '../utils';
+import type { Exercise, ReadinessCheck, Workout, WorkoutExercise, WorkoutSet, WorkoutTemplate } from '../types';
+import { generateId, calcWorkoutVolume, calcMuscleStress, calcSessionWorkload, estimate1RM } from '../utils';
 import { db } from '../db';
 
 interface ActiveWorkoutState {
@@ -14,7 +14,7 @@ interface ActiveWorkoutState {
   } | null;
 
   // Actions
-  startWorkout: (name?: string, templateId?: string) => void;
+  startWorkout: (name?: string, readiness?: ReadinessCheck, template?: WorkoutTemplate) => void;
   addExercise: (exerciseId: string) => void;
   removeExercise: (exerciseIndex: number) => void;
   reorderExercises: (from: number, to: number) => void;
@@ -25,7 +25,7 @@ interface ActiveWorkoutState {
   setExerciseNotes: (exerciseIndex: number, notes: string) => void;
   startRestTimer: (seconds: number, exerciseId?: string) => void;
   stopRestTimer: () => void;
-  finishWorkout: () => Promise<Workout | null>;
+  finishWorkout: (sessionRpe: number, exercises: Record<string, Exercise>) => Promise<Workout | null>;
   discardWorkout: () => void;
   updateWorkoutName: (name: string) => void;
 }
@@ -36,14 +36,31 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
       workout: null,
       restTimer: null,
 
-      startWorkout: (name = 'Quick Workout') => {
+      startWorkout: (name = 'Quick Workout', readiness, template) => {
         const workout: Workout = {
           id: generateId(),
-          name,
+          name: template?.name ?? name,
           startedAt: Date.now(),
-          exercises: [],
+          readinessId: readiness?.id,
+          readinessScore: readiness?.score,
+          recoveryMultiplier: readiness?.recoveryMultiplier,
+          templateId: template?.id,
+          exercises: template?.exercises.map((item, order) => ({
+            id: generateId(),
+            exerciseId: item.exerciseId,
+            order,
+            restSeconds: item.restSeconds,
+            sets: Array.from({ length: item.sets }, () => ({
+              id: generateId(),
+              type: item.type,
+              weight: 0,
+              reps: Number.parseInt(item.targetReps) || 0,
+              completed: false,
+            })),
+          })) ?? [],
         };
         set({ workout });
+        if (template) void db.templates.update(template.id, { lastUsed: Date.now() });
       },
 
       addExercise: (exerciseId) => {
@@ -158,13 +175,16 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
         set({ restTimer: null });
       },
 
-      finishWorkout: async () => {
+      finishWorkout: async (sessionRpe, exercises) => {
         const { workout } = get();
         if (!workout) return null;
         const completedWorkout: Workout = {
           ...workout,
           completedAt: Date.now(),
           totalVolume: calcWorkoutVolume(workout),
+          sessionRpe,
+          workload: calcSessionWorkload(sessionRpe, Date.now() - workout.startedAt),
+          muscleStress: calcMuscleStress(workout, exercises),
         };
         await db.workouts.put(completedWorkout);
 
@@ -195,15 +215,12 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
           }
 
           // Check estimated 1RM PR
-          const best1rm = workingSets.reduce((best, s) => {
-            const rm = s.weight * (1 + s.reps / 30);
-            return rm > best ? rm : best;
-          }, 0);
+          const best1rm = workingSets.reduce((best, s) => Math.max(best, estimate1RM(s.weight, s.reps) ?? 0), 0);
           const prev1rmPRs = await db.personalRecords
             .where({ exerciseId: exercise.exerciseId, type: 'estimated1rm' })
             .sortBy('value');
           const prev1rm = prev1rmPRs[prev1rmPRs.length - 1];
-          if (!prev1rm || best1rm > prev1rm.value) {
+          if (best1rm > 0 && (!prev1rm || best1rm > prev1rm.value)) {
             await db.personalRecords.put({
               id: generateId(),
               exerciseId: exercise.exerciseId,

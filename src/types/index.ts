@@ -19,6 +19,23 @@ export type MuscleGroup =
   | 'cardio'
   | 'full_body';
 
+export type IndividualMuscle =
+  | 'chest'
+  | 'front_delts'
+  | 'side_delts'
+  | 'rear_delts'
+  | 'lats'
+  | 'upper_back'
+  | 'lower_back'
+  | 'biceps'
+  | 'triceps'
+  | 'forearms'
+  | 'quads'
+  | 'hamstrings'
+  | 'glutes'
+  | 'calves'
+  | 'abs';
+
 export type Equipment =
   | 'barbell'
   | 'dumbbell'
@@ -62,6 +79,12 @@ export interface Workout {
   totalVolume?: number;
   isTemplate?: boolean;
   templateId?: string;
+  readinessId?: string;
+  readinessScore?: number;
+  recoveryMultiplier?: number;
+  sessionRpe?: number;
+  workload?: number;
+  muscleStress?: Partial<Record<IndividualMuscle, number>>;
 }
 
 export interface Exercise {
@@ -98,6 +121,20 @@ export interface WorkoutTemplate {
   }[];
   createdAt: number;
   lastUsed?: number;
+  sourceWorkoutId?: string;
+}
+
+export interface ReadinessCheck {
+  id: string;
+  date: string;
+  sleep: number;
+  soreness: number;
+  energy: number;
+  stress: number;
+  motivation: number;
+  score: number;
+  recoveryMultiplier: number;
+  createdAt: number;
 }
 
 export type ActiveSet = WorkoutSet & {

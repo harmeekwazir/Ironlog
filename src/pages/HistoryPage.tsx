@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ChevronRight, Dumbbell, X, Calendar, Timer, Zap, Weight } from 'lucide-react';
+import { ChevronRight, Dumbbell, X, Calendar, Timer, Zap, Weight, Save, Check } from 'lucide-react';
 import { db } from '../db';
 import type { Workout, Exercise } from '../types';
-import { formatDuration, calcWorkoutVolume } from '../utils';
+import { formatDuration, calcWorkoutVolume, generateId } from '../utils';
 import { format, isToday, isYesterday, isThisWeek } from 'date-fns';
 
 function groupByDate(workouts: Workout[]): Record<string, Workout[]> {
@@ -24,6 +24,7 @@ export function HistoryPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [exercises, setExercises] = useState<Record<string, Exercise>>({});
   const [selected, setSelected] = useState<Workout | null>(null);
+  const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -38,6 +39,31 @@ export function HistoryPage() {
   }, []);
 
   const groups = groupByDate([...workouts].reverse());
+
+  const saveAsTemplate = async (workout: Workout) => {
+    const existing = await db.templates.filter(template => template.sourceWorkoutId === workout.id).first();
+    const id = existing?.id ?? generateId();
+    await db.templates.put({
+      id,
+      name: workout.name,
+      sourceWorkoutId: workout.id,
+      createdAt: existing?.createdAt ?? Date.now(),
+      lastUsed: existing?.lastUsed,
+      exercises: workout.exercises.map(item => {
+        const completedSets = item.sets.filter(set => set.completed);
+        const referenceSets = completedSets.length > 0 ? completedSets : item.sets;
+        const firstSet = referenceSets[0];
+        return {
+          exerciseId: item.exerciseId,
+          sets: Math.max(1, referenceSets.length),
+          targetReps: String(firstSet?.reps || '8-12'),
+          restSeconds: item.restSeconds ?? firstSet?.restSeconds ?? 120,
+          type: firstSet?.type ?? 'working',
+        };
+      }),
+    });
+    setSavedTemplateId(workout.id);
+  };
 
   if (selected) {
     const duration = selected.completedAt! - selected.startedAt;
@@ -56,6 +82,19 @@ export function HistoryPage() {
         </div>
 
         <div className="px-4 pt-4 space-y-4">
+          <button
+            onClick={() => void saveAsTemplate(selected)}
+            disabled={savedTemplateId === selected.id}
+            className={`w-full flex items-center justify-center gap-2 rounded-2xl border py-3 font-bold text-sm transition-colors ${
+              savedTemplateId === selected.id
+                ? 'border-volt-400/20 bg-volt-400/10 text-volt-300'
+                : 'border-iron-700 bg-iron-900 text-white hover:border-volt-400/40'
+            }`}
+          >
+            {savedTemplateId === selected.id ? <Check size={16} /> : <Save size={16} />}
+            {savedTemplateId === selected.id ? 'Saved to templates' : 'Save as template'}
+          </button>
+
           <div className="grid grid-cols-3 gap-3">
             {[
               { icon: Timer, label: 'Duration', value: formatDuration(duration) },

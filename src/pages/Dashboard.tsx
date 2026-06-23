@@ -1,275 +1,244 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Flame, Trophy, TrendingUp, Calendar, Dumbbell, Plus, Settings2, User } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts';
+import {
+  Activity, ArrowRight, BatteryCharging, CalendarDays, ChevronRight,
+  Dumbbell, Flame, Gauge, Settings2, ShieldCheck, User,
+} from 'lucide-react';
+import { eachDayOfInterval, format, isToday, startOfDay, subDays } from 'date-fns';
 import { db } from '../db';
 import { useActiveWorkout } from '../store/activeWorkout';
 import { useNav } from '../store/nav';
-import { useProfile } from '../store/profile';
-import { formatDuration, calcWorkoutVolume, calcBMI, getMuscleGroupColor } from '../utils';
-import type { Workout } from '../types';
-import { format, isToday, isThisWeek, subWeeks, endOfWeek, eachWeekOfInterval } from 'date-fns';
+import type { ReadinessCheck, Workout } from '../types';
+import {
+  calcWorkoutVolume, formatDuration, getAcwr, getMuscleRecovery,
+  getReadinessLabel, MUSCLE_LABELS,
+} from '../utils';
 
 export function Dashboard() {
-  const { workout, startWorkout } = useActiveWorkout();
+  const { workout } = useActiveWorkout();
   const { setPage } = useNav();
-  const profile = useProfile();
-  const [recentWorkouts, setRecentWorkouts] = useState<Workout[]>([]);
-  const [stats, setStats] = useState({ streak: 0, weeklyCount: 0, totalPRs: 0, totalLifted: 0 });
-  const [weeklyVolume, setWeeklyVolume] = useState<{ week: string; volume: number; count: number }[]>([]);
-  const [muscleVolume, setMuscleVolume] = useState<{ name: string; volume: number; color: string }[]>([]);
-
-  const bodyMetrics = useMemo(() => ({
-    bmi: calcBMI(profile.weightKg, profile.heightCm),
-    idealWeight: Math.round(22 * (profile.heightCm / 100) ** 2),
-  }), [profile.weightKg, profile.heightCm]);
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [readiness, setReadiness] = useState<ReadinessCheck | null>(null);
+  const [prCount, setPrCount] = useState(0);
 
   useEffect(() => {
-    async function load() {
-      const allCompleted = await db.workouts.filter(w => !!w.completedAt).toArray();
-      const recent = await db.workouts.orderBy('completedAt').reverse().filter(w => !!w.completedAt).limit(5).toArray();
-      setRecentWorkouts(recent);
+    const load = async () => {
+      const date = format(new Date(), 'yyyy-MM-dd');
+      const [allWorkouts, todayReadiness, prs] = await Promise.all([
+        db.workouts.filter(item => !!item.completedAt).toArray(),
+        db.readiness.where('date').equals(date).last(),
+        db.personalRecords.count(),
+      ]);
+      setWorkouts(allWorkouts.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0)));
+      setReadiness(todayReadiness ?? null);
+      setPrCount(prs);
+    };
+    void load();
+  }, []);
 
-      const prs = await db.personalRecords.count();
-
-      const sorted = allCompleted.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
-      let streak = 0;
-      const seenDays = new Set<string>();
-      for (const w of sorted) {
-        const day = format(new Date(w.completedAt!), 'yyyy-MM-dd');
-        if (!seenDays.has(day)) {
-          seenDays.add(day);
-          streak += 1;
-        }
-      }
-
-      const weeklyCount = allCompleted.filter(w => isThisWeek(new Date(w.completedAt!), { weekStartsOn: 1 })).length;
-      const totalLifted = allCompleted.reduce((s, w) => s + (w.totalVolume ?? calcWorkoutVolume(w)), 0);
-
-      const weeks = eachWeekOfInterval({ start: subWeeks(new Date(), 7), end: new Date() }, { weekStartsOn: 1 });
-      const weekData = weeks.map((weekStart) => {
-        const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
-        const items = allCompleted.filter((w) => {
-          const date = new Date(w.completedAt!);
-          return date >= weekStart && date <= weekEnd;
-        });
-        return {
-          week: format(weekStart, 'MMM d'),
-          volume: Math.round(items.reduce((sum, w) => sum + (w.totalVolume ?? calcWorkoutVolume(w)), 0) / 1000),
-          count: items.length,
-        };
-      });
-
-      const exercises = await db.exercises.toArray();
-      const exMap = Object.fromEntries(exercises.map((ex) => [ex.id, ex]));
-      const muscleVolumeTotals: Record<string, number> = {};
-      for (const workout of allCompleted.slice(-20)) {
-        for (const exercise of workout.exercises) {
-          const exerciseData = exMap[exercise.exerciseId];
-          if (!exerciseData) continue;
-          const volume = exercise.sets.filter((s) => s.completed && s.type !== 'warmup').reduce((sum, set) => sum + set.weight * set.reps, 0);
-          exerciseData.muscleGroups.forEach((group) => {
-            muscleVolumeTotals[group] = (muscleVolumeTotals[group] ?? 0) + volume;
-          });
-        }
-      }
-      const muscleVolumeItems = Object.entries(muscleVolumeTotals)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([name, volume]) => ({ name: name.charAt(0).toUpperCase() + name.slice(1), volume, color: getMuscleGroupColor(name) }));
-
-      setStats({ streak, weeklyCount, totalPRs: prs, totalLifted });
-      setWeeklyVolume(weekData);
-      setMuscleVolume(muscleVolumeItems);
-    }
-    load();
-  }, [profile]);
-
-  const handleStartWorkout = () => {
-    if (!workout) startWorkout();
-    setPage('workout');
-  };
+  const acwr = useMemo(() => getAcwr(workouts), [workouts]);
+  const muscleRecovery = useMemo(
+    () => getMuscleRecovery(workouts).sort((a, b) => a.recovery - b.recovery),
+    [workouts],
+  );
+  const weekWorkouts = workouts.filter(item => (item.completedAt ?? 0) >= subDays(new Date(), 7).getTime());
+  const weekLoad = weekWorkouts.reduce((sum, item) => sum + (item.workload ?? 0), 0);
+  const averageRecovery = Math.round(muscleRecovery.reduce((sum, item) => sum + item.recovery, 0) / muscleRecovery.length);
+  const totalVolume = workouts.reduce((sum, item) => sum + (item.totalVolume ?? calcWorkoutVolume(item)), 0);
 
   return (
-    <div className="flex flex-col min-h-full pb-24">
-      <div className="px-4 pt-12 pb-4 flex items-start justify-between gap-4">
-        <div>
-          <p className="text-iron-400 text-sm font-medium">{format(new Date(), 'EEEE, MMMM d')}</p>
-          <h1 className="text-3xl font-black text-white tracking-tight mt-1">Welcome back</h1>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setPage('profile')} className="rounded-3xl border border-iron-800 bg-iron-900 p-3 text-iron-300 hover:text-white transition-colors">
-            <User size={18} />
-          </button>
-          <button onClick={() => setPage('settings')} className="rounded-3xl border border-iron-800 bg-iron-900 p-3 text-iron-300 hover:text-white transition-colors">
-            <Settings2 size={18} />
-          </button>
-        </div>
-      </div>
-
-      <div className="px-4 grid gap-3 mb-6">
-        <div className="bg-iron-900 rounded-3xl border border-iron-800 p-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-iron-400 text-xs uppercase tracking-wide">Body metrics</p>
-              <p className="text-white text-lg font-black mt-2">{profile.goal}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setPage('profile')}
-              className="rounded-3xl bg-volt-400/10 px-3 py-2 text-volt-300 text-xs font-semibold transition-colors hover:bg-volt-400/20 hover:text-white"
-            >
-              Update profile
-            </button>
+    <div className="min-h-screen pb-28">
+      <header className="px-5 pt-11 pb-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-iron-500">{format(new Date(), 'EEEE · MMM d')}</p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-white">Training command</h1>
           </div>
-
-          <div className="grid grid-cols-2 gap-3 mt-4">
-            <div className="rounded-3xl bg-iron-950 p-4 border border-iron-800">
-              <p className="text-iron-400 text-[11px] uppercase tracking-wide">Weight</p>
-              <p className="text-white text-2xl font-black mt-2">{profile.weightKg} kg</p>
-            </div>
-            <div className="rounded-3xl bg-iron-950 p-4 border border-iron-800">
-              <p className="text-iron-400 text-[11px] uppercase tracking-wide">Height</p>
-              <p className="text-white text-2xl font-black mt-2">{profile.heightCm} cm</p>
-            </div>
-            <div className="rounded-3xl bg-iron-950 p-4 border border-iron-800">
-              <p className="text-iron-400 text-[11px] uppercase tracking-wide">BMI</p>
-              <p className="text-white text-2xl font-black mt-2">{bodyMetrics.bmi > 0 ? bodyMetrics.bmi.toFixed(1) : '–'}</p>
-            </div>
-            <div className="rounded-3xl bg-iron-950 p-4 border border-iron-800">
-              <p className="text-iron-400 text-[11px] uppercase tracking-wide">Ideal weight</p>
-              <p className="text-white text-2xl font-black mt-2">{bodyMetrics.idealWeight} kg</p>
-            </div>
+          <div className="flex gap-2">
+            <button onClick={() => setPage('profile')} className="rounded-2xl border border-iron-800 bg-iron-900 p-3 text-iron-400"><User size={18} /></button>
+            <button onClick={() => setPage('settings')} className="rounded-2xl border border-iron-800 bg-iron-900 p-3 text-iron-400"><Settings2 size={18} /></button>
           </div>
         </div>
+      </header>
 
-        <div className="grid grid-cols-2 gap-3">
-          {[
-            { label: 'Workout Streak', value: `${stats.streak}`, icon: Flame, color: 'text-ember-400' },
-            { label: 'This Week', value: `${stats.weeklyCount}`, icon: Calendar, color: 'text-blue-400' },
-            { label: 'Total PRs', value: `${stats.totalPRs}`, icon: Trophy, color: 'text-volt-400' },
-            { label: 'Total Volume', value: stats.totalLifted > 1000 ? `${(stats.totalLifted / 1000).toFixed(1)}k` : `${stats.totalLifted}`, icon: TrendingUp, color: 'text-green-400' },
-          ].map((item) => (
-            <div key={item.label} className="bg-iron-900 rounded-3xl border border-iron-800 p-4">
-              <item.icon size={18} className={`${item.color} mb-2`} />
-              <p className="text-2xl font-black text-white">{item.value}</p>
-              <p className="text-iron-500 text-xs mt-1 uppercase tracking-wide">{item.label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="px-4 space-y-4 mb-6">
-        <div className="bg-iron-900 rounded-3xl border border-iron-800 p-4">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div>
-              <p className="text-white font-bold">Weekly volume</p>
-              <p className="text-iron-500 text-xs">Last 8 weeks</p>
-            </div>
-            <div className="text-iron-400 text-xs">kg × 1000</div>
-          </div>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyVolume} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
-                <XAxis dataKey="week" tick={{ fill: '#737373', fontSize: 10 }} axisLine={false} tickLine={false} interval={1} />
-                <YAxis tick={{ fill: '#737373', fontSize: 10 }} axisLine={false} tickLine={false} />
-                <Tooltip cursor={{ fill: 'rgba(255,255,255,0.03)' }} wrapperStyle={{ borderRadius: 12, border: '1px solid #2b2b2b', background: '#121212' }} />
-                <Bar dataKey="volume" name="t" fill="#d4f52a" radius={[8, 8, 0, 0]} maxBarSize={32} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="bg-iron-900 rounded-3xl border border-iron-800 p-4">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div>
-              <p className="text-white font-bold">Weekly sessions</p>
-              <p className="text-iron-500 text-xs">Workout frequency</p>
-            </div>
-            <div className="text-iron-400 text-xs">sessions</div>
-          </div>
-          <div className="h-36">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={weeklyVolume} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
-                <XAxis dataKey="week" tick={{ fill: '#737373', fontSize: 10 }} axisLine={false} tickLine={false} interval={1} />
-                <YAxis tick={{ fill: '#737373', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip wrapperStyle={{ borderRadius: 12, border: '1px solid #2b2b2b', background: '#121212' }} />
-                <Line type="monotone" dataKey="count" stroke="#ff6b35" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      <div className="px-4 mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-white font-bold text-base">Focus areas</h2>
-          <button onClick={() => setPage('analytics')} className="text-volt-400 text-sm font-medium">View trends</button>
-        </div>
-        <div className="grid gap-3">
-          {muscleVolume.length === 0 ? (
-            <div className="rounded-3xl bg-iron-900 border border-iron-800 p-4 text-iron-500 text-sm">Add workouts to see muscle group volume.</div>
-          ) : muscleVolume.map((item) => (
-            <div key={item.name} className="rounded-3xl bg-iron-900 border border-iron-800 p-4">
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <p className="text-white font-bold text-sm">{item.name}</p>
-                <p className="text-iron-400 text-xs">{item.volume.toLocaleString()} kg</p>
-              </div>
-              <div className="h-2 rounded-full bg-iron-800 overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${Math.min(100, item.volume / muscleVolume[0].volume * 100)}%`, backgroundColor: item.color }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {workout === null && (
-        <div className="mx-4 mb-6">
-          <button onClick={handleStartWorkout}
-            className="w-full py-4 rounded-2xl bg-volt-400 text-iron-950 font-black text-lg tracking-tight flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg shadow-volt-400/20">
-            <Plus size={22} strokeWidth={3} /> Start Workout
-          </button>
-        </div>
-      )}
-
-      <div className="px-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-white font-bold text-base">Recent Workouts</h2>
-          <button onClick={() => setPage('history')} className="text-volt-400 text-sm font-medium">See all</button>
-        </div>
-        {recentWorkouts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 bg-iron-900 rounded-2xl border border-iron-800">
-            <Dumbbell size={32} className="text-iron-600 mb-3" />
-            <p className="text-iron-400 text-sm">No workouts yet. Start lifting!</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {recentWorkouts.map((w) => {
-              const duration = w.completedAt && w.startedAt ? w.completedAt - w.startedAt : 0;
-              const vol = w.totalVolume ?? calcWorkoutVolume(w);
-              return (
-                <button key={w.id} onClick={() => setPage('history')} className="w-full flex items-center gap-3 px-4 py-3 bg-iron-900 rounded-2xl border border-iron-800 text-left hover:border-iron-700 transition-colors">
-                  <div className="w-10 h-10 rounded-xl bg-iron-800 flex items-center justify-center flex-shrink-0">
-                    <Dumbbell size={18} className="text-volt-400" />
+      <main className="px-4 space-y-4">
+        <section className="overflow-hidden rounded-[30px] border border-iron-800 bg-iron-900">
+          <div className="grid grid-cols-[1.15fr_.85fr]">
+            <div className="p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-volt-400">Today’s readiness</p>
+              {readiness ? (
+                <>
+                  <div className="mt-3 flex items-end gap-2">
+                    <span className="text-5xl font-black tracking-tighter text-white">{readiness.score}</span>
+                    <span className="pb-1 text-sm font-bold text-iron-500">/100</span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white font-semibold text-sm truncate">{w.name}</p>
-                    <p className="text-iron-500 text-xs">
-                      {isToday(new Date(w.completedAt!)) ? 'Today' : format(new Date(w.completedAt!), 'MMM d')}
-                      {duration > 0 && ` · ${formatDuration(duration)}`}
-                    </p>
+                  <p className="mt-1 text-sm font-bold text-volt-300">{getReadinessLabel(readiness.score)}</p>
+                  <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-volt-400/10 px-3 py-1.5 text-xs font-bold text-volt-300">
+                    <BatteryCharging size={14} /> Recovery ×{readiness.recoveryMultiplier}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2 className="mt-4 text-2xl font-black text-white">No check-in yet</h2>
+                  <p className="mt-2 max-w-48 text-sm leading-relaxed text-iron-400">Take the 20-second Hooper check before training.</p>
+                </>
+              )}
+            </div>
+            <div className="relative flex items-center justify-center bg-gradient-to-br from-volt-400/15 to-transparent p-5">
+              <div
+                className="flex h-28 w-28 items-center justify-center rounded-full"
+                style={{ background: `conic-gradient(#d4f52a ${(readiness?.score ?? 0) * 3.6}deg, #222 0deg)` }}
+              >
+                <div className="flex h-24 w-24 flex-col items-center justify-center rounded-full bg-iron-900">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-iron-500">Muscles</span>
+                  <span className="text-2xl font-black text-white">{averageRecovery}%</span>
+                  <span className="text-[10px] text-iron-500">recovered</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button onClick={() => setPage('workout')} className="flex w-full items-center justify-between border-t border-iron-800 px-5 py-4 text-left">
+            <div>
+              <p className="text-sm font-black text-white">{workout ? 'Resume active workout' : readiness ? 'Start today’s workout' : 'Check in & start'}</p>
+              <p className="mt-0.5 text-xs text-iron-500">{workout ? workout.name : 'Readiness gates every new session'}</p>
+            </div>
+            <div className="rounded-xl bg-volt-400 p-2.5 text-iron-950"><ArrowRight size={18} /></div>
+          </button>
+        </section>
+
+        <section className="grid grid-cols-3 gap-2">
+          <Metric icon={Gauge} label="7d load" value={`${weekLoad}`} tint="text-blue-400" />
+          <Metric icon={Activity} label="ACWR" value={acwr.ratio ? acwr.ratio.toFixed(2) : '—'} tint={acwr.ratio > 1.5 ? 'text-red-400' : 'text-volt-400'} />
+          <Metric icon={Flame} label="Sessions" value={`${weekWorkouts.length}`} tint="text-ember-400" />
+        </section>
+
+        <section className="rounded-[28px] border border-iron-800 bg-iron-900 p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="font-black text-white">Load status</p>
+              <p className="mt-0.5 text-xs text-iron-500">Acute : chronic workload ratio</p>
+            </div>
+            <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${
+              acwr.status === 'Sweet spot' ? 'bg-volt-400/10 text-volt-300' :
+              acwr.status === 'High spike' ? 'bg-red-400/10 text-red-400' :
+              'bg-iron-800 text-iron-300'
+            }`}>{acwr.status}</span>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-iron-800">
+            <div className="h-full rounded-full bg-gradient-to-r from-blue-400 via-volt-400 to-red-400" style={{ width: `${Math.min(100, (acwr.ratio / 2) * 100)}%` }} />
+          </div>
+          <div className="mt-2 flex justify-between text-[10px] text-iron-600">
+            <span>Acute {acwr.acute} AU</span><span>Chronic {acwr.chronicWeekly} AU/wk</span>
+          </div>
+        </section>
+
+        <ConsistencyGrid workouts={workouts} />
+
+        <section className="rounded-[28px] border border-iron-800 bg-iron-900 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-black text-white">Muscle recovery</p>
+              <p className="mt-0.5 text-xs text-iron-500">48h exponential fatigue decay · 15 muscles</p>
+            </div>
+            <ShieldCheck size={20} className="text-volt-400" />
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            {muscleRecovery.map(item => (
+              <div key={item.muscle} className="rounded-2xl bg-iron-950 p-3">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="truncate text-[10px] font-bold text-iron-400">{MUSCLE_LABELS[item.muscle]}</span>
+                  <span className={`text-[10px] font-black ${item.recovery >= 75 ? 'text-volt-400' : item.recovery >= 45 ? 'text-amber-400' : 'text-red-400'}`}>{item.recovery}</span>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-iron-800">
+                  <div className={`h-full rounded-full ${item.recovery >= 75 ? 'bg-volt-400' : item.recovery >= 45 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${item.recovery}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h2 className="font-black text-white">Recent sessions</h2>
+              <p className="text-xs text-iron-500">{prCount} PRs · {(totalVolume / 1000).toFixed(1)}t lifetime volume</p>
+            </div>
+            <button onClick={() => setPage('history')} className="text-xs font-bold text-volt-400">All history</button>
+          </div>
+          {workouts.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-iron-700 py-10 text-center">
+              <Dumbbell size={25} className="mx-auto text-iron-700" />
+              <p className="mt-3 text-sm text-iron-400">Your first session starts the story.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {workouts.slice(0, 4).map(item => (
+                <button key={item.id} onClick={() => setPage('history')} className="flex w-full items-center gap-3 rounded-2xl border border-iron-800 bg-iron-900 p-3 text-left">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-iron-800"><Dumbbell size={16} className="text-volt-400" /></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-white">{item.name}</p>
+                    <p className="text-xs text-iron-500">{isToday(new Date(item.completedAt!)) ? 'Today' : format(new Date(item.completedAt!), 'MMM d')} · {formatDuration(item.completedAt! - item.startedAt)}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-white text-sm font-bold">{vol > 0 ? `${vol.toLocaleString()} kg` : '–'}</p>
-                    <p className="text-iron-500 text-xs">{w.exercises?.length ?? 0} exercises</p>
+                    <p className="text-sm font-black text-white">{item.workload ?? 0} AU</p>
+                    <p className="text-[10px] text-iron-600">RPE {item.sessionRpe ?? '—'}</p>
                   </div>
+                  <ChevronRight size={15} className="text-iron-600" />
                 </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </main>
     </div>
+  );
+}
+
+function Metric({ icon: Icon, label, value, tint }: { icon: React.ElementType; label: string; value: string; tint: string }) {
+  return (
+    <div className="rounded-2xl border border-iron-800 bg-iron-900 p-3">
+      <Icon size={15} className={tint} />
+      <p className="mt-3 text-xl font-black text-white">{value}</p>
+      <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-iron-600">{label}</p>
+    </div>
+  );
+}
+
+function ConsistencyGrid({ workouts }: { workouts: Workout[] }) {
+  const days = eachDayOfInterval({ start: subDays(startOfDay(new Date()), 90), end: startOfDay(new Date()) });
+  const counts = workouts.reduce<Record<string, number>>((acc, workout) => {
+    if (!workout.completedAt) return acc;
+    const key = format(new Date(workout.completedAt), 'yyyy-MM-dd');
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+  const activeDays = days.filter(day => counts[format(day, 'yyyy-MM-dd')]).length;
+
+  return (
+    <section className="rounded-[28px] border border-iron-800 bg-iron-900 p-4">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="font-black text-white">Consistency</p>
+          <p className="mt-0.5 text-xs text-iron-500">Last 13 weeks</p>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs font-bold text-volt-400"><CalendarDays size={15} /> {activeDays} active days</div>
+      </div>
+      <div className="mt-4 grid grid-flow-col grid-rows-7 gap-1.5 overflow-hidden">
+        {days.map(day => {
+          const count = counts[format(day, 'yyyy-MM-dd')] ?? 0;
+          return (
+            <div
+              key={day.toISOString()}
+              title={`${format(day, 'MMM d')}: ${count} workout${count === 1 ? '' : 's'}`}
+              className={`aspect-square min-w-0 rounded-[3px] ${count > 1 ? 'bg-volt-300' : count === 1 ? 'bg-volt-500/80' : 'bg-iron-800'}`}
+            />
+          );
+        })}
+      </div>
+      <div className="mt-3 flex items-center justify-between text-[10px] text-iron-600">
+        <span>13 weeks ago</span>
+        <div className="flex items-center gap-1"><span>Less</span><i className="h-2.5 w-2.5 rounded-sm bg-iron-800" /><i className="h-2.5 w-2.5 rounded-sm bg-volt-500/80" /><i className="h-2.5 w-2.5 rounded-sm bg-volt-300" /><span>More</span></div>
+        <span>Today</span>
+      </div>
+    </section>
   );
 }
