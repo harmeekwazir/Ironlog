@@ -141,3 +141,15 @@ export type ActiveSet = WorkoutSet & {
   exerciseIndex: number;
   setIndex: number;
 };
+
+export interface OverloadSuggestion {
+  exerciseId: string;
+  exerciseName: string;
+  lastWeight: number;
+  lastReps: number;
+  suggestedWeight: number;
+  suggestedReps: number;
+  trend: 'improving' | 'stalled' | 'new' | 'deload';
+  sessionCount: number;
+  lastTrainedAt: number;
+}

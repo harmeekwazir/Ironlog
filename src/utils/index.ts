@@ -1,4 +1,4 @@
-import type { Exercise, IndividualMuscle, ReadinessCheck, WorkoutSet, WorkoutExercise, Workout } from '../types';
+import type { Exercise, IndividualMuscle, OverloadSuggestion, ReadinessCheck, WorkoutSet, WorkoutExercise, Workout } from '../types';
 
 export const INDIVIDUAL_MUSCLES: IndividualMuscle[] = [
   'chest', 'front_delts', 'side_delts', 'rear_delts', 'lats',
@@ -286,4 +286,78 @@ export function startOfWeek(date: Date): number {
 
 export function startOfMonth(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+}
+
+export function getOverloadSuggestions(
+  workouts: Workout[],
+  exercises: Record<string, Exercise>,
+  limit = 10,
+): OverloadSuggestion[] {
+  const sorted = [...workouts].sort((a, b) => (a.completedAt ?? 0) - (b.completedAt ?? 0));
+  const historyMap: Record<string, { date: number; topWeight: number; topReps: number }[]> = {};
+
+  for (const workout of sorted) {
+    if (!workout.completedAt) continue;
+    for (const ex of workout.exercises) {
+      const workingSets = ex.sets.filter(s => s.completed && s.type !== 'warmup' && s.weight > 0 && s.reps > 0);
+      if (!workingSets.length) continue;
+      const topSet = workingSets.reduce((best, s) => (s.weight > best.weight ? s : best), workingSets[0]);
+      if (!historyMap[ex.exerciseId]) historyMap[ex.exerciseId] = [];
+      historyMap[ex.exerciseId].push({ date: workout.completedAt, topWeight: topSet.weight, topReps: topSet.reps });
+    }
+  }
+
+  const results: OverloadSuggestion[] = [];
+
+  for (const [exerciseId, history] of Object.entries(historyMap)) {
+    const ex = exercises[exerciseId];
+    if (!ex || history.length === 0) continue;
+
+    const last = history[history.length - 1];
+    const prev = history.length >= 2 ? history[history.length - 2] : null;
+    const prev2 = history.length >= 3 ? history[history.length - 3] : null;
+
+    const isLower = ex.muscleGroups.some(g => g === 'legs');
+    const increment = isLower ? 5 : 2.5;
+
+    let trend: OverloadSuggestion['trend'];
+    let suggestedWeight = last.topWeight;
+    let suggestedReps = last.topReps;
+
+    if (!prev) {
+      trend = 'new';
+      suggestedReps = last.topReps >= 12 ? Math.max(6, last.topReps - 3) : Math.min(last.topReps + 1, 15);
+      if (last.topReps >= 12) suggestedWeight = last.topWeight + increment;
+    } else if (last.topWeight > prev.topWeight) {
+      trend = 'improving';
+      suggestedReps = last.topReps >= 12 ? Math.max(6, last.topReps - 3) : Math.min(last.topReps + 1, 15);
+      if (last.topReps >= 12) suggestedWeight = last.topWeight + increment;
+    } else if (last.topWeight < prev.topWeight) {
+      trend = 'deload';
+    } else {
+      const stalledThree = !!prev2 && last.topWeight === prev2.topWeight;
+      if (last.topReps >= 10 || stalledThree) {
+        trend = 'stalled';
+        suggestedWeight = last.topWeight + increment;
+        suggestedReps = Math.max(6, last.topReps - 2);
+      } else {
+        trend = 'improving';
+        suggestedReps = Math.min(last.topReps + 1, 15);
+      }
+    }
+
+    results.push({
+      exerciseId,
+      exerciseName: ex.name,
+      lastWeight: last.topWeight,
+      lastReps: last.topReps,
+      suggestedWeight,
+      suggestedReps,
+      trend,
+      sessionCount: history.length,
+      lastTrainedAt: last.date,
+    });
+  }
+
+  return results.sort((a, b) => b.lastTrainedAt - a.lastTrainedAt).slice(0, limit);
 }

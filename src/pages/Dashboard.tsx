@@ -1,17 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, ArrowRight, BatteryCharging, CalendarDays, ChevronRight,
-  Dumbbell, Flame, Gauge, Settings2, ShieldCheck, User,
+  Activity, AlertTriangle, ArrowRight, BatteryCharging, CalendarDays, ChevronRight,
+  Dumbbell, Flame, Gauge, Settings2, ShieldCheck, TrendingUp, User, Zap,
 } from 'lucide-react';
 import { eachDayOfInterval, format, isToday, startOfDay, subDays } from 'date-fns';
 import { db } from '../db';
 import { useActiveWorkout } from '../store/activeWorkout';
 import { useNav } from '../store/nav';
-import type { ReadinessCheck, Workout } from '../types';
+import type { Exercise, OverloadSuggestion, ReadinessCheck, Workout } from '../types';
 import {
   calcWorkoutVolume, formatDuration, getAcwr, getMuscleRecovery,
-  getReadinessLabel, MUSCLE_LABELS,
+  getOverloadSuggestions, getReadinessLabel, MUSCLE_LABELS,
 } from '../utils';
+
+function readinessTheme(score?: number) {
+  if (score === undefined) return { label: 'text-volt-300', badge: 'bg-volt-400/10 text-volt-300', gauge: '#d4f52a', gradFrom: 'from-volt-400/15' };
+  if (score < 50)          return { label: 'text-red-300',  badge: 'bg-red-400/10 text-red-300',   gauge: '#f87171', gradFrom: 'from-red-400/15' };
+  if (score < 70)          return { label: 'text-amber-300', badge: 'bg-amber-400/10 text-amber-300', gauge: '#fbbf24', gradFrom: 'from-amber-400/15' };
+  if (score < 85)          return { label: 'text-blue-300', badge: 'bg-blue-400/10 text-blue-300',  gauge: '#60a5fa', gradFrom: 'from-blue-400/15' };
+  return                          { label: 'text-volt-300', badge: 'bg-volt-400/10 text-volt-300',  gauge: '#d4f52a', gradFrom: 'from-volt-400/15' };
+}
 
 export function Dashboard() {
   const { workout } = useActiveWorkout();
@@ -19,18 +27,24 @@ export function Dashboard() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [readiness, setReadiness] = useState<ReadinessCheck | null>(null);
   const [prCount, setPrCount] = useState(0);
+  const [suggestions, setSuggestions] = useState<OverloadSuggestion[]>([]);
 
   useEffect(() => {
     const load = async () => {
       const date = format(new Date(), 'yyyy-MM-dd');
-      const [allWorkouts, todayReadiness, prs] = await Promise.all([
+      const [allWorkouts, todayReadiness, prs, exAll] = await Promise.all([
         db.workouts.filter(item => !!item.completedAt).toArray(),
         db.readiness.where('date').equals(date).last(),
         db.personalRecords.count(),
+        db.exercises.toArray(),
       ]);
-      setWorkouts(allWorkouts.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0)));
+      const sorted = allWorkouts.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
+      setWorkouts(sorted);
       setReadiness(todayReadiness ?? null);
       setPrCount(prs);
+      const exMap: Record<string, Exercise> = {};
+      exAll.forEach(e => { exMap[e.id] = e; });
+      setSuggestions(getOverloadSuggestions(sorted, exMap, 5));
     };
     void load();
   }, []);
@@ -44,6 +58,26 @@ export function Dashboard() {
   const weekLoad = weekWorkouts.reduce((sum, item) => sum + (item.workload ?? 0), 0);
   const averageRecovery = Math.round(muscleRecovery.reduce((sum, item) => sum + item.recovery, 0) / muscleRecovery.length);
   const totalVolume = workouts.reduce((sum, item) => sum + (item.totalVolume ?? calcWorkoutVolume(item)), 0);
+
+  const theme = readinessTheme(readiness?.score);
+  const recovColor = averageRecovery >= 75 ? '#d4f52a' : averageRecovery >= 45 ? '#fbbf24' : '#f87171';
+
+  const advisory = (() => {
+    if (averageRecovery < 45) {
+      const sore = muscleRecovery.filter(m => m.recovery < 40).map(m => MUSCLE_LABELS[m.muscle]).slice(0, 3).join(', ');
+      return { Icon: AlertTriangle, cls: 'border-red-400/20 bg-red-400/5', iconCls: 'text-red-400', title: 'High muscle fatigue', body: `${sore} need recovery. Consider a lighter session today.` };
+    }
+    if (readiness && readiness.score < 50) {
+      return { Icon: AlertTriangle, cls: 'border-amber-400/20 bg-amber-400/5', iconCls: 'text-amber-400', title: 'Low readiness today', body: 'Reduce intensity or focus on mobility and recovery work.' };
+    }
+    if (acwr.status === 'High spike') {
+      return { Icon: Zap, cls: 'border-red-400/20 bg-red-400/5', iconCls: 'text-red-400', title: 'Training load spike', body: `ACWR ${acwr.ratio.toFixed(2)} exceeds the safe ceiling. Reduce weekly volume to manage injury risk.` };
+    }
+    if (averageRecovery >= 80 && readiness && readiness.score >= 80) {
+      return { Icon: Zap, cls: 'border-volt-400/20 bg-volt-400/5', iconCls: 'text-volt-400', title: 'Peak condition', body: 'Full recovery + high readiness. Push your limits today.' };
+    }
+    return null;
+  })();
 
   return (
     <div className="min-h-screen pb-28">
@@ -61,18 +95,19 @@ export function Dashboard() {
       </header>
 
       <main className="px-4 space-y-4">
+        {/* Readiness card — colors react to score */}
         <section className="overflow-hidden rounded-[30px] border border-iron-800 bg-iron-900">
           <div className="grid grid-cols-[1.15fr_.85fr]">
             <div className="p-5">
-              <p className="text-xs font-bold uppercase tracking-[0.15em] text-volt-400">Today’s readiness</p>
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-volt-400">Today's readiness</p>
               {readiness ? (
                 <>
                   <div className="mt-3 flex items-end gap-2">
                     <span className="text-5xl font-black tracking-tighter text-white">{readiness.score}</span>
                     <span className="pb-1 text-sm font-bold text-iron-500">/100</span>
                   </div>
-                  <p className="mt-1 text-sm font-bold text-volt-300">{getReadinessLabel(readiness.score)}</p>
-                  <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-volt-400/10 px-3 py-1.5 text-xs font-bold text-volt-300">
+                  <p className={`mt-1 text-sm font-bold ${theme.label}`}>{getReadinessLabel(readiness.score)}</p>
+                  <div className={`mt-4 inline-flex items-center gap-2 rounded-full ${theme.badge} px-3 py-1.5 text-xs font-bold`}>
                     <BatteryCharging size={14} /> Recovery ×{readiness.recoveryMultiplier}
                   </div>
                 </>
@@ -83,14 +118,15 @@ export function Dashboard() {
                 </>
               )}
             </div>
-            <div className="relative flex items-center justify-center bg-gradient-to-br from-volt-400/15 to-transparent p-5">
+            {/* Gauge right — gradient and ring color both driven by readiness score */}
+            <div className={`relative flex items-center justify-center bg-gradient-to-br ${theme.gradFrom} to-transparent p-5`}>
               <div
                 className="flex h-28 w-28 items-center justify-center rounded-full"
-                style={{ background: `conic-gradient(#d4f52a ${(readiness?.score ?? 0) * 3.6}deg, #222 0deg)` }}
+                style={{ background: `conic-gradient(${theme.gauge} ${(readiness?.score ?? 0) * 3.6}deg, #222 0deg)` }}
               >
                 <div className="flex h-24 w-24 flex-col items-center justify-center rounded-full bg-iron-900">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-iron-500">Muscles</span>
-                  <span className="text-2xl font-black text-white">{averageRecovery}%</span>
+                  <span className="text-2xl font-black" style={{ color: recovColor }}>{averageRecovery}%</span>
                   <span className="text-[10px] text-iron-500">recovered</span>
                 </div>
               </div>
@@ -110,6 +146,17 @@ export function Dashboard() {
           <Metric icon={Activity} label="ACWR" value={acwr.ratio ? acwr.ratio.toFixed(2) : '—'} tint={acwr.ratio > 1.5 ? 'text-red-400' : 'text-volt-400'} />
           <Metric icon={Flame} label="Sessions" value={`${weekWorkouts.length}`} tint="text-ember-400" />
         </section>
+
+        {/* Advisory banner — surfaces one actionable state at a time */}
+        {advisory && (
+          <div className={`rounded-2xl border ${advisory.cls} p-4 flex items-start gap-3`}>
+            <advisory.Icon size={18} className={`${advisory.iconCls} mt-0.5 flex-shrink-0`} />
+            <div>
+              <p className="text-sm font-bold text-white">{advisory.title}</p>
+              <p className="mt-0.5 text-xs text-iron-400">{advisory.body}</p>
+            </div>
+          </div>
+        )}
 
         <section className="rounded-[28px] border border-iron-800 bg-iron-900 p-4">
           <div className="flex items-start justify-between">
@@ -156,6 +203,24 @@ export function Dashboard() {
           </div>
         </section>
 
+        {/* Progressive overload — only renders when there's training history */}
+        {suggestions.length > 0 && (
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="font-black text-white">Next session targets</h2>
+                <p className="text-xs text-iron-500">Progressive overload suggestions</p>
+              </div>
+              <button onClick={() => setPage('analytics')} className="text-xs font-bold text-volt-400">View PRs</button>
+            </div>
+            <div className="space-y-2">
+              {suggestions.slice(0, 3).map(s => (
+                <OverloadCard key={s.exerciseId} suggestion={s} />
+              ))}
+            </div>
+          </section>
+        )}
+
         <section>
           <div className="mb-3 flex items-center justify-between">
             <div>
@@ -199,6 +264,32 @@ function Metric({ icon: Icon, label, value, tint }: { icon: React.ElementType; l
       <Icon size={15} className={tint} />
       <p className="mt-3 text-xl font-black text-white">{value}</p>
       <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-iron-600">{label}</p>
+    </div>
+  );
+}
+
+const TREND_META = {
+  improving: { label: '↑ Improving', cls: 'text-volt-400' },
+  stalled:   { label: '→ Plateau',   cls: 'text-amber-400' },
+  new:       { label: '★ First run', cls: 'text-iron-500' },
+  deload:    { label: '↓ Deload',    cls: 'text-red-400' },
+} as const;
+
+function OverloadCard({ suggestion: s }: { suggestion: OverloadSuggestion }) {
+  const meta = TREND_META[s.trend];
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-iron-800 bg-iron-900 p-3">
+      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-iron-800">
+        <TrendingUp size={16} className="text-volt-400" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-bold text-white">{s.exerciseName}</p>
+        <p className="text-xs text-iron-500">Last: {s.lastWeight}kg × {s.lastReps}</p>
+      </div>
+      <div className="flex-shrink-0 text-right">
+        <p className="text-sm font-black text-volt-400">{s.suggestedWeight}kg × {s.suggestedReps}</p>
+        <p className={`text-[10px] font-bold ${meta.cls}`}>{meta.label}</p>
+      </div>
     </div>
   );
 }

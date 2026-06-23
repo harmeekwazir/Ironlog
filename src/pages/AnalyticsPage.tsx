@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts';
 import { TrendingUp, Trophy, Calendar, Activity } from 'lucide-react';
 import { db } from '../db';
-import type { Workout, Exercise, PersonalRecord } from '../types';
-import { calcWorkoutVolume, getMuscleGroupColor, calcBMI, getBMICategory } from '../utils';
+import type { Workout, Exercise, PersonalRecord, OverloadSuggestion } from '../types';
+import { calcWorkoutVolume, getMuscleGroupColor, calcBMI, getBMICategory, getOverloadSuggestions } from '../utils';
 import { useProfile } from '../store/profile';
 import { format, subWeeks, endOfWeek, eachWeekOfInterval } from 'date-fns';
 
@@ -19,11 +19,28 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
+function timeAgo(ts: number): string {
+  const days = Math.floor((Date.now() - ts) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
+const TREND_META = {
+  improving: { label: '↑ Improving', cls: 'text-volt-400' },
+  stalled:   { label: '→ Plateau',   cls: 'text-amber-400' },
+  new:       { label: '★ New PR',    cls: 'text-iron-400' },
+  deload:    { label: '↓ Deload',    cls: 'text-red-400' },
+} as const;
+
 export function AnalyticsPage() {
   const [tab, setTab] = useState<'overview' | 'volume' | 'prs'>('overview');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [exercises, setExercises] = useState<Record<string, Exercise>>({});
   const [prs, setPrs] = useState<PersonalRecord[]>([]);
+  const [overloadSuggestions, setOverloadSuggestions] = useState<OverloadSuggestion[]>([]);
   const [weeklyVolume, setWeeklyVolume] = useState<{ week: string; volume: number; count: number }[]>([]);
   const [muscleVolume, setMuscleVolume] = useState<{ name: string; volume: number; color: string }[]>([]);
   const profile = useProfile();
@@ -41,6 +58,7 @@ export function AnalyticsPage() {
       setWorkouts(all);
       setExercises(exMap);
       setPrs(prAll);
+      setOverloadSuggestions(getOverloadSuggestions(all, exMap, 100));
 
       // Weekly volume (last 12 weeks)
       const now = new Date();
@@ -87,13 +105,24 @@ export function AnalyticsPage() {
     ? workouts.reduce((s, w) => s + (w.completedAt! - w.startedAt), 0) / workouts.length
     : 0;
 
-  // Group PRs by exercise
-  const prByExercise: Record<string, { name: string; weight?: number; e1rm?: number }> = {};
+  // Build PR map, capturing most-recent achievedAt per exercise (prs is sorted desc by achievedAt)
+  const prByExercise: Record<string, { name: string; weight?: number; e1rm?: number; achievedAt: number }> = {};
   for (const pr of prs) {
-    if (!prByExercise[pr.exerciseId]) prByExercise[pr.exerciseId] = { name: exercises[pr.exerciseId]?.name ?? 'Unknown' };
+    if (!prByExercise[pr.exerciseId]) {
+      prByExercise[pr.exerciseId] = {
+        name: exercises[pr.exerciseId]?.name ?? 'Unknown',
+        achievedAt: pr.achievedAt,
+      };
+    }
     if (pr.type === 'weight') prByExercise[pr.exerciseId].weight = pr.value;
     if (pr.type === 'estimated1rm') prByExercise[pr.exerciseId].e1rm = pr.value;
   }
+
+  // Sort PRs by most recently achieved first
+  const sortedPrEntries = Object.entries(prByExercise).sort(([, a], [, b]) => b.achievedAt - a.achievedAt);
+
+  // Build overload map keyed by exerciseId for O(1) lookups in PR list
+  const overloadMap = Object.fromEntries(overloadSuggestions.map(s => [s.exerciseId, s]));
 
   return (
     <div className="flex flex-col min-h-full pb-24">
@@ -219,27 +248,55 @@ export function AnalyticsPage() {
 
         {tab === 'prs' && (
           <div className="space-y-2">
-            {Object.values(prByExercise).length === 0 ? (
+            {sortedPrEntries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-iron-500">
                 <Trophy size={40} className="mb-3 opacity-30" />
                 <p className="text-sm">No PRs yet. Start training!</p>
               </div>
             ) : (
-              Object.entries(prByExercise).map(([id, pr]) => (
-                <div key={id} className="flex items-center gap-3 px-4 py-3 bg-iron-900 rounded-2xl border border-iron-800">
-                  <div className="w-8 h-8 rounded-lg bg-amber-400/10 flex items-center justify-center flex-shrink-0">
-                    <Trophy size={14} className="text-amber-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white font-semibold text-sm truncate">{pr.name}</p>
-                    <p className="text-iron-500 text-xs">Personal Record</p>
-                  </div>
-                  <div className="text-right">
-                    {pr.weight && <p className="text-white font-bold text-sm">{pr.weight} kg</p>}
-                    {pr.e1rm && <p className="text-iron-500 text-xs">e1RM {pr.e1rm} kg</p>}
-                  </div>
+              <>
+                <div className="flex items-center justify-between px-1 pb-1">
+                  <p className="text-xs text-iron-500">{sortedPrEntries.length} exercises tracked</p>
+                  <p className="text-xs text-iron-600">Most recent first</p>
                 </div>
-              ))
+                {sortedPrEntries.map(([id, pr]) => {
+                  const suggestion = overloadMap[id];
+                  const trendMeta = suggestion ? TREND_META[suggestion.trend] : null;
+                  return (
+                    <div key={id} className="bg-iron-900 rounded-2xl border border-iron-800 overflow-hidden">
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <div className="w-8 h-8 rounded-lg bg-amber-400/10 flex items-center justify-center flex-shrink-0">
+                          <Trophy size={14} className="text-amber-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white font-semibold text-sm truncate">{pr.name}</p>
+                          <p className="text-iron-500 text-xs">{timeAgo(pr.achievedAt)}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          {pr.weight !== undefined && <p className="text-white font-bold text-sm">{pr.weight} kg</p>}
+                          {pr.e1rm !== undefined && <p className="text-iron-500 text-xs">e1RM {pr.e1rm} kg</p>}
+                          {trendMeta && <p className={`text-[10px] font-bold ${trendMeta.cls}`}>{trendMeta.label}</p>}
+                        </div>
+                      </div>
+                      {/* Next target row */}
+                      {suggestion && (
+                        <div className="flex items-center gap-2 border-t border-iron-800 px-4 py-2.5">
+                          <TrendingUp size={12} className="text-volt-400 flex-shrink-0" />
+                          <p className="text-xs text-iron-400">
+                            Next target:{' '}
+                            <span className="font-bold text-volt-300">
+                              {suggestion.suggestedWeight}kg × {suggestion.suggestedReps}
+                            </span>
+                            {suggestion.sessionCount > 1 && (
+                              <span className="ml-2 text-iron-600">· {suggestion.sessionCount} sessions</span>
+                            )}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
             )}
           </div>
         )}
