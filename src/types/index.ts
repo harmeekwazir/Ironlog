@@ -14,10 +14,14 @@ export type MuscleGroup =
   | 'back'
   | 'legs'
   | 'shoulders'
+  | 'biceps'
+  | 'triceps'
+  | 'forearms'
   | 'arms'
   | 'core'
   | 'cardio'
-  | 'full_body';
+  | 'full_body'
+  | 'full-body';
 
 export type IndividualMuscle =
   | 'chest'

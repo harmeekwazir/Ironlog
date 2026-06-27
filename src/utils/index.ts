@@ -94,40 +94,95 @@ export function getAcwr(workouts: Workout[], now = Date.now()) {
 }
 
 const EXERCISE_MUSCLES: Record<string, Partial<Record<IndividualMuscle, number>>> = {
-  'ex-001': { chest: 0.55, front_delts: 0.2, triceps: 0.25 },
-  'ex-002': { chest: 0.5, front_delts: 0.3, triceps: 0.2 },
-  'ex-003': { chest: 0.85, front_delts: 0.15 },
-  'ex-004': { chest: 0.9, front_delts: 0.1 },
-  'ex-005': { chest: 0.5, front_delts: 0.2, triceps: 0.3 },
-  'ex-006': { chest: 0.35, front_delts: 0.15, triceps: 0.5 },
-  'ex-007': { glutes: 0.25, hamstrings: 0.2, lower_back: 0.2, upper_back: 0.15, forearms: 0.2 },
-  'ex-008': { lats: 0.55, biceps: 0.25, upper_back: 0.1, forearms: 0.1 },
-  'ex-009': { upper_back: 0.35, lats: 0.3, biceps: 0.2, rear_delts: 0.1, forearms: 0.05 },
-  'ex-010': { lats: 0.55, biceps: 0.25, upper_back: 0.1, forearms: 0.1 },
-  'ex-011': { upper_back: 0.4, lats: 0.3, biceps: 0.2, rear_delts: 0.1 },
-  'ex-012': { upper_back: 0.4, lats: 0.3, biceps: 0.2, rear_delts: 0.1 },
-  'ex-013': { quads: 0.45, glutes: 0.3, hamstrings: 0.15, lower_back: 0.1 },
-  'ex-014': { hamstrings: 0.4, glutes: 0.3, lower_back: 0.2, forearms: 0.1 },
-  'ex-015': { quads: 0.55, glutes: 0.3, hamstrings: 0.15 },
-  'ex-016': { quads: 1 },
-  'ex-017': { hamstrings: 1 },
-  'ex-018': { calves: 1 },
-  'ex-019': { quads: 0.45, glutes: 0.35, hamstrings: 0.2 },
-  'ex-020': { front_delts: 0.45, side_delts: 0.2, triceps: 0.3, abs: 0.05 },
-  'ex-021': { front_delts: 0.45, side_delts: 0.25, triceps: 0.3 },
-  'ex-022': { side_delts: 0.9, front_delts: 0.1 },
-  'ex-023': { rear_delts: 0.45, upper_back: 0.35, biceps: 0.2 },
-  'ex-024': { rear_delts: 0.65, upper_back: 0.35 },
-  'ex-025': { biceps: 0.75, forearms: 0.25 },
-  'ex-026': { biceps: 0.75, forearms: 0.25 },
-  'ex-027': { biceps: 0.5, forearms: 0.5 },
-  'ex-028': { triceps: 1 },
-  'ex-029': { triceps: 0.9, forearms: 0.1 },
-  'ex-030': { triceps: 0.55, chest: 0.3, front_delts: 0.15 },
-  'ex-031': { abs: 0.75, glutes: 0.1, front_delts: 0.15 },
-  'ex-032': { abs: 1 },
-  'ex-033': { abs: 0.75, forearms: 0.15, lats: 0.1 },
-  'ex-034': { abs: 0.7, lats: 0.15, front_delts: 0.15 },
+  // Chest — ex-001..ex-011
+  'ex-001': { chest: 0.55, front_delts: 0.2, triceps: 0.25 },   // Barbell Bench Press
+  'ex-002': { chest: 0.5, front_delts: 0.3, triceps: 0.2 },     // Incline Dumbbell Press
+  'ex-003': { chest: 0.85, front_delts: 0.15 },                  // Dumbbell Flyes
+  'ex-004': { chest: 0.9, front_delts: 0.1 },                    // Cable Crossover
+  'ex-005': { chest: 0.5, front_delts: 0.2, triceps: 0.3 },     // Push-ups
+  'ex-006': { chest: 0.35, front_delts: 0.15, triceps: 0.5 },   // Dips
+  'ex-007': { chest: 0.5, front_delts: 0.3, triceps: 0.2 },     // Incline Barbell Bench Press
+  'ex-008': { chest: 0.65, triceps: 0.25, front_delts: 0.1 },   // Decline Bench Press
+  'ex-009': { chest: 0.75, front_delts: 0.15, triceps: 0.1 },   // Machine Chest Press
+  'ex-010': { chest: 0.9, front_delts: 0.1 },                    // Pec Deck Fly
+  'ex-011': { chest: 0.9, front_delts: 0.1 },                    // Single Arm Cable Fly
+  // Back — ex-012..ex-022
+  'ex-012': { glutes: 0.25, hamstrings: 0.2, lower_back: 0.2, upper_back: 0.15, forearms: 0.2 }, // Deadlift
+  'ex-013': { lats: 0.55, biceps: 0.25, upper_back: 0.1, forearms: 0.1 },                        // Pull-ups
+  'ex-014': { upper_back: 0.35, lats: 0.3, biceps: 0.2, rear_delts: 0.1, forearms: 0.05 },       // Barbell Row
+  'ex-015': { lats: 0.55, biceps: 0.25, upper_back: 0.1, forearms: 0.1 },                        // Lat Pulldown
+  'ex-016': { upper_back: 0.4, lats: 0.3, biceps: 0.2, rear_delts: 0.1 },                        // Seated Cable Row
+  'ex-017': { upper_back: 0.4, lats: 0.3, biceps: 0.2, rear_delts: 0.1 },                        // T-Bar Row
+  'ex-018': { upper_back: 0.45, lats: 0.3, rear_delts: 0.15, biceps: 0.1 },                      // Chest Supported Row
+  'ex-019': { lats: 0.4, upper_back: 0.3, biceps: 0.2, rear_delts: 0.1 },                        // Single Arm Dumbbell Row
+  'ex-020': { lats: 0.75, upper_back: 0.15, abs: 0.1 },                                           // Straight Arm Pulldown
+  'ex-021': { upper_back: 0.4, lats: 0.3, biceps: 0.2, rear_delts: 0.1 },                        // Machine Row
+  'ex-022': { upper_back: 0.4, lats: 0.35, rear_delts: 0.15, biceps: 0.1 },                      // Meadows Row
+  // Legs — ex-023..ex-037
+  'ex-023': { quads: 0.45, glutes: 0.3, hamstrings: 0.15, lower_back: 0.1 }, // Barbell Squat
+  'ex-024': { hamstrings: 0.4, glutes: 0.3, lower_back: 0.2, forearms: 0.1 }, // Romanian Deadlift
+  'ex-025': { quads: 0.55, glutes: 0.3, hamstrings: 0.15 },                   // Leg Press
+  'ex-026': { quads: 1 },                                                       // Leg Extension
+  'ex-027': { hamstrings: 1 },                                                  // Leg Curl
+  'ex-028': { calves: 1 },                                                      // Calf Raise
+  'ex-029': { quads: 0.45, glutes: 0.35, hamstrings: 0.2 },                   // Bulgarian Split Squat
+  'ex-030': { quads: 0.55, glutes: 0.25, lower_back: 0.1, abs: 0.1 },         // Front Squat
+  'ex-031': { quads: 0.6, glutes: 0.25, hamstrings: 0.15 },                   // Hack Squat
+  'ex-032': { quads: 0.45, glutes: 0.35, hamstrings: 0.2 },                   // Walking Lunges
+  'ex-033': { quads: 0.5, glutes: 0.3, hamstrings: 0.1, upper_back: 0.1 },   // Goblet Squat
+  'ex-034': { glutes: 0.7, hamstrings: 0.2, abs: 0.1 },                       // Hip Thrust
+  'ex-035': { glutes: 0.75, hamstrings: 0.2, abs: 0.05 },                     // Glute Bridge
+  'ex-036': { calves: 1 },                                                      // Seated Calf Raise
+  'ex-037': { calves: 1 },                                                      // Standing Calf Raise
+  // Shoulders — ex-038..ex-047
+  'ex-038': { front_delts: 0.45, side_delts: 0.2, triceps: 0.3, abs: 0.05 }, // Overhead Press
+  'ex-039': { front_delts: 0.45, side_delts: 0.25, triceps: 0.3 },            // Dumbbell Shoulder Press
+  'ex-040': { side_delts: 0.9, front_delts: 0.1 },                            // Lateral Raises
+  'ex-041': { rear_delts: 0.45, upper_back: 0.35, biceps: 0.2 },              // Face Pulls
+  'ex-042': { rear_delts: 0.65, upper_back: 0.35 },                           // Rear Delt Flyes
+  'ex-043': { front_delts: 0.4, side_delts: 0.3, triceps: 0.3 },              // Arnold Press
+  'ex-044': { side_delts: 0.9, front_delts: 0.1 },                            // Cable Lateral Raise
+  'ex-045': { front_delts: 0.4, side_delts: 0.3, triceps: 0.3 },              // Machine Shoulder Press
+  'ex-046': { front_delts: 0.9, side_delts: 0.1 },                            // Front Raise
+  'ex-047': { side_delts: 0.35, upper_back: 0.3, front_delts: 0.2, biceps: 0.15 }, // Upright Row
+  // Biceps — ex-048..ex-055
+  'ex-048': { biceps: 0.75, forearms: 0.25 },  // Barbell Curl
+  'ex-049': { biceps: 0.75, forearms: 0.25 },  // Dumbbell Curl
+  'ex-050': { biceps: 0.5, forearms: 0.5 },    // Hammer Curl
+  'ex-051': { biceps: 0.9, forearms: 0.1 },    // Preacher Curl
+  'ex-052': { biceps: 0.8, forearms: 0.2 },    // Cable Curl
+  'ex-053': { biceps: 0.75, forearms: 0.25 },  // EZ Bar Curl
+  'ex-054': { biceps: 0.9, forearms: 0.1 },    // Spider Curl
+  'ex-055': { biceps: 0.9, forearms: 0.1 },    // Concentration Curl
+  // Triceps — ex-056..ex-063
+  'ex-056': { triceps: 1 },                                      // Tricep Pushdown
+  'ex-057': { triceps: 0.9, forearms: 0.1 },                    // Skull Crushers
+  'ex-058': { triceps: 0.55, chest: 0.3, front_delts: 0.15 },  // Close Grip Bench Press
+  'ex-059': { triceps: 1 },                                      // Overhead Cable Extension
+  'ex-060': { triceps: 1 },                                      // Overhead Dumbbell Extension
+  'ex-061': { triceps: 0.7, chest: 0.2, front_delts: 0.1 },    // Bench Dips
+  'ex-062': { triceps: 1 },                                      // Cable Kickback
+  'ex-063': { triceps: 1 },                                      // Single Arm Pushdown
+  // Forearms — ex-064..ex-068
+  'ex-064': { forearms: 1 },                                                            // Wrist Curl
+  'ex-065': { forearms: 1 },                                                            // Reverse Wrist Curl
+  'ex-066': { forearms: 0.6, upper_back: 0.15, glutes: 0.1, quads: 0.1, abs: 0.05 }, // Farmer Carry
+  'ex-067': { forearms: 1 },                                                            // Plate Pinch Hold
+  'ex-068': { biceps: 0.3, forearms: 0.7 },                                            // Reverse Curl
+  // Core — ex-069..ex-079
+  'ex-069': { abs: 0.75, glutes: 0.1, front_delts: 0.15 },    // Plank
+  'ex-070': { abs: 1 },                                          // Cable Crunch
+  'ex-071': { abs: 0.75, forearms: 0.15, lats: 0.1 },          // Hanging Leg Raise
+  'ex-072': { abs: 0.7, lats: 0.15, front_delts: 0.15 },       // Ab Wheel Rollout
+  'ex-073': { abs: 0.9, forearms: 0.1 },                        // Russian Twist
+  'ex-074': { abs: 1 },                                          // Decline Sit-up
+  'ex-075': { abs: 1 },                                          // Bicycle Crunch
+  'ex-076': { abs: 0.6, front_delts: 0.2, quads: 0.2 },        // Mountain Climbers
+  'ex-077': { abs: 1 },                                          // Dead Bug
+  'ex-078': { abs: 0.7, glutes: 0.15, front_delts: 0.15 },     // Side Plank
+  'ex-079': { abs: 0.9, quads: 0.1 },                           // V-Ups
+  // Full Body — ex-080
+  'ex-080': { glutes: 0.2, quads: 0.15, lower_back: 0.15, upper_back: 0.15, front_delts: 0.15, triceps: 0.1, forearms: 0.1 }, // Clean and Press
 };
 
 function fallbackMuscles(exercise?: Exercise): Partial<Record<IndividualMuscle, number>> {
@@ -136,8 +191,13 @@ function fallbackMuscles(exercise?: Exercise): Partial<Record<IndividualMuscle, 
     case 'back': return { lats: 0.4, upper_back: 0.3, biceps: 0.2, forearms: 0.1 };
     case 'legs': return { quads: 0.35, hamstrings: 0.25, glutes: 0.25, calves: 0.15 };
     case 'shoulders': return { front_delts: 0.35, side_delts: 0.35, rear_delts: 0.3 };
+    case 'biceps': return { biceps: 0.8, forearms: 0.2 };
+    case 'triceps': return { triceps: 0.85, forearms: 0.15 };
+    case 'forearms': return { forearms: 1 };
     case 'arms': return { biceps: 0.4, triceps: 0.4, forearms: 0.2 };
     case 'core': return { abs: 1 };
+    case 'full_body':
+    case 'full-body': return { quads: 0.2, glutes: 0.15, upper_back: 0.15, chest: 0.1, front_delts: 0.1, triceps: 0.1, abs: 0.1, lower_back: 0.05, hamstrings: 0.05 };
     default: return { abs: 1 };
   }
 }
@@ -147,34 +207,58 @@ export function calcMuscleStress(workout: Workout, exercises: Record<string, Exe
   for (const item of workout.exercises) {
     const distribution = EXERCISE_MUSCLES[item.exerciseId] ?? fallbackMuscles(exercises[item.exerciseId]);
     for (const set of item.sets.filter(s => s.completed && s.type !== 'warmup')) {
-      const rpe = set.rpe ?? 7;
-      const repFactor = Math.max(0.65, Math.min(1.35, set.reps / 10));
-      const typeFactor = set.type === 'failure' || set.type === 'amrap' ? 1.2 : set.type === 'dropset' ? 1.1 : 1;
+      const rpe = Math.max(5, Math.min(10, set.rpe ?? 7));
+      // Volume load: sqrt(weight × reps / 600) normalises to ~1.0 at 60 kg × 10 reps.
+      // Bodyweight sets treated as 60 kg equivalent. Reps capped at 30 to dampen cardio noise.
+      const load = set.weight > 0
+        ? set.weight * Math.min(set.reps, 30)
+        : Math.min(set.reps, 30) * 60;
+      const volumeFactor = Math.sqrt(load / 600);
+      // RPE non-linear: 7→1.0, 8→1.47, 9→1.88, 10→2.44 — heavier effort amplifies stress sharply
+      const rpeFactor = Math.pow(rpe / 7, 2.5);
+      const typeFactor = set.type === 'failure' || set.type === 'amrap' ? 1.3
+        : set.type === 'dropset' ? 1.15
+        : set.type === 'tempo' ? 1.1
+        : 1.0;
+      const setStress = volumeFactor * rpeFactor * typeFactor;
       for (const [muscle, fraction] of Object.entries(distribution) as [IndividualMuscle, number][]) {
-        totals[muscle] = (totals[muscle] ?? 0) + rpe * repFactor * typeFactor * fraction;
+        totals[muscle] = (totals[muscle] ?? 0) + setStress * fraction;
       }
     }
   }
   return totals;
 }
 
-export function getMuscleRecovery(workouts: Workout[], now = Date.now()) {
+// τ_stress = 7: at stress=2.0 recovery≈75%, at stress=7 recovery≈37%, at stress=14 recovery≈14%
+// τ_time  = 30h: half-life ≈20h so a hard session stays amber for ~48h, ready at ~60h
+const TAU_STRESS = 7;
+const TAU_TIME   = 30;
+// stress level at which recovery == 75% (the "ready" threshold)
+const STRESS_AT_75 = TAU_STRESS * -Math.log(0.75); // ≈ 2.01
+
+export function getMuscleRecovery(workouts: Workout[], exercises?: Record<string, Exercise>, now = Date.now()) {
   const remaining: Partial<Record<IndividualMuscle, number>> = {};
   for (const workout of workouts) {
-    if (!workout.completedAt || !workout.muscleStress) continue;
+    if (!workout.completedAt) continue;
     const hours = Math.max(0, (now - workout.completedAt) / 3600000);
-    const decay = Math.exp(-hours / 48);
-    for (const [muscle, stress] of Object.entries(workout.muscleStress) as [IndividualMuscle, number][]) {
+    const decay = Math.exp(-hours / TAU_TIME);
+    // Prefer live recomputation when exercises are available so formula changes
+    // apply retroactively; fall back to stored muscleStress for workouts with no exercises map
+    const stressMap = exercises
+      ? calcMuscleStress(workout, exercises)
+      : workout.muscleStress;
+    if (!stressMap) continue;
+    for (const [muscle, stress] of Object.entries(stressMap) as [IndividualMuscle, number][]) {
       remaining[muscle] = (remaining[muscle] ?? 0) + stress * decay;
     }
   }
   return INDIVIDUAL_MUSCLES.map(muscle => {
     const stress = remaining[muscle] ?? 0;
-    return {
-      muscle,
-      stress,
-      recovery: Math.round(100 * Math.exp(-stress / 18)),
-    };
+    const recovery = Math.round(100 * Math.exp(-stress / TAU_STRESS));
+    const hoursUntilReady = stress > STRESS_AT_75
+      ? Math.ceil(-TAU_TIME * Math.log(STRESS_AT_75 / stress))
+      : 0;
+    return { muscle, stress, recovery, hoursUntilReady };
   });
 }
 
@@ -262,9 +346,13 @@ export function getMuscleGroupColor(group: string): string {
     legs: '#45b7d1',
     shoulders: '#f9c74f',
     arms: '#f8961e',
+    biceps: '#f8961e',
+    triceps: '#f3722c',
+    forearms: '#f4a261',
     core: '#90be6d',
     cardio: '#9b5de5',
     full_body: '#f72585',
+    'full-body': '#f72585',
   };
   return colors[group] || '#a8a8a8';
 }

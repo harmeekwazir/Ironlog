@@ -12,6 +12,8 @@ import {
   calcWorkoutVolume, formatDuration, getAcwr, getMuscleRecovery,
   getOverloadSuggestions, getReadinessLabel, MUSCLE_LABELS,
 } from '../utils';
+import frontSvgRaw from '../assets/front.svg?raw';
+import backSvgRaw from '../assets/Back.svg?raw';
 
 function readinessTheme(score?: number) {
   if (score === undefined) return { label: 'text-volt-300', badge: 'bg-volt-400/10 text-volt-300', gauge: '#d4f52a', gradFrom: 'from-volt-400/15' };
@@ -25,6 +27,7 @@ export function Dashboard() {
   const { workout } = useActiveWorkout();
   const { setPage } = useNav();
   const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [exercises, setExercises] = useState<Record<string, Exercise>>({});
   const [readiness, setReadiness] = useState<ReadinessCheck | null>(null);
   const [prCount, setPrCount] = useState(0);
   const [suggestions, setSuggestions] = useState<OverloadSuggestion[]>([]);
@@ -44,6 +47,7 @@ export function Dashboard() {
       setPrCount(prs);
       const exMap: Record<string, Exercise> = {};
       exAll.forEach(e => { exMap[e.id] = e; });
+      setExercises(exMap);
       setSuggestions(getOverloadSuggestions(sorted, exMap, 5));
     };
     void load();
@@ -51,8 +55,8 @@ export function Dashboard() {
 
   const acwr = useMemo(() => getAcwr(workouts), [workouts]);
   const muscleRecovery = useMemo(
-    () => getMuscleRecovery(workouts).sort((a, b) => a.recovery - b.recovery),
-    [workouts],
+    () => getMuscleRecovery(workouts, exercises).sort((a, b) => a.recovery - b.recovery),
+    [workouts, exercises],
   );
   const weekWorkouts = workouts.filter(item => (item.completedAt ?? 0) >= subDays(new Date(), 7).getTime());
   const weekLoad = weekWorkouts.reduce((sum, item) => sum + (item.workload ?? 0), 0);
@@ -180,28 +184,7 @@ export function Dashboard() {
 
         <ConsistencyGrid workouts={workouts} />
 
-        <section className="rounded-[28px] border border-iron-800 bg-iron-900 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-black text-white">Muscle recovery</p>
-              <p className="mt-0.5 text-xs text-iron-500">48h exponential fatigue decay · 15 muscles</p>
-            </div>
-            <ShieldCheck size={20} className="text-volt-400" />
-          </div>
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            {muscleRecovery.map(item => (
-              <div key={item.muscle} className="rounded-2xl bg-iron-950 p-3">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="truncate text-[10px] font-bold text-iron-400">{MUSCLE_LABELS[item.muscle]}</span>
-                  <span className={`text-[10px] font-black ${item.recovery >= 75 ? 'text-volt-400' : item.recovery >= 45 ? 'text-amber-400' : 'text-red-400'}`}>{item.recovery}</span>
-                </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-iron-800">
-                  <div className={`h-full rounded-full ${item.recovery >= 75 ? 'bg-volt-400' : item.recovery >= 45 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${item.recovery}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+        <BodyHeatmap muscleRecovery={muscleRecovery} />
 
         {/* Progressive overload — only renders when there's training history */}
         {suggestions.length > 0 && (
@@ -291,6 +274,131 @@ function OverloadCard({ suggestion: s }: { suggestion: OverloadSuggestion }) {
         <p className={`text-[10px] font-bold ${meta.cls}`}>{meta.label}</p>
       </div>
     </div>
+  );
+}
+
+type MuscleRecoveryItem = { muscle: import('../types').IndividualMuscle; stress: number; recovery: number; hoursUntilReady: number };
+
+const FRONT_IDS: Partial<Record<import('../types').IndividualMuscle, string[]>> = {
+  chest:       ['chest'],
+  front_delts: ['shoulder-front-delts'],
+  side_delts:  ['shoulder-side-delts'],
+  triceps:     ['triceps', 'triceps_2'],
+  biceps:      ['biceps', 'biceps_2'],
+  forearms:    ['forearms', 'forearms_2', 'forearms_3', 'forearms_4', 'forearms_5'],
+  abs:         ['abs', 'abs-obliques'],
+  quads:       ['quads', 'quads_2', 'quads_3', 'quads_4', 'quads_5'],
+  calves:      ['calves', 'calves_2', 'calves_3', 'calves_4', 'calves_5'],
+  lats:        ['back-lats'],
+  upper_back:  ['back-traps'],
+  glutes:      ['glutes-adductors'],
+};
+
+const BACK_IDS: Partial<Record<import('../types').IndividualMuscle, string[]>> = {
+  rear_delts: ['shoulder-rear-delts'],
+  side_delts: ['shoulder-side-delts'],
+  triceps:    ['triceps'],
+  forearms:   ['forearm-extensors', 'forearm-extensors_2', 'forearm-extensors_3', 'forearm-supinator', 'forearm-flexor'],
+  lats:       ['back-lats'],
+  upper_back: ['back-upper-back', 'back-upperback', 'back-middle-back', 'back-upper-traps', 'back-mid-traps', 'back-lower-traps'],
+  hamstrings: ['hamstrings'],
+  glutes:     ['glutes', 'glutes-abductors', 'glutes-abductors_2', 'glutes-adductors', 'glutes-adductors_2'],
+  quads:      ['quads', 'quads_2'],
+  calves:     ['calves'],
+  abs:        ['abs-obliques'],
+};
+
+const HEATMAP_REGIONS = [
+  { label: 'Push', muscles: ['chest', 'front_delts', 'side_delts', 'triceps'] as import('../types').IndividualMuscle[] },
+  { label: 'Pull', muscles: ['lats', 'upper_back', 'rear_delts', 'biceps', 'forearms', 'lower_back'] as import('../types').IndividualMuscle[] },
+  { label: 'Legs', muscles: ['quads', 'hamstrings', 'glutes', 'calves'] as import('../types').IndividualMuscle[] },
+  { label: 'Core', muscles: ['abs'] as import('../types').IndividualMuscle[] },
+];
+
+function hmColor(r: number) { return r >= 75 ? '#d4f52a' : r >= 45 ? '#fbbf24' : '#f87171'; }
+
+function colorSvg(
+  raw: string,
+  idsMap: Partial<Record<import('../types').IndividualMuscle, string[]>>,
+  byMuscle: Partial<Record<import('../types').IndividualMuscle, MuscleRecoveryItem>>,
+): string {
+  const NEUTRAL = '#374151';
+  const colorMap = new Map<string, string>();
+  for (const ids of Object.values(idsMap)) {
+    if (ids) for (const id of ids) colorMap.set(id, NEUTRAL);
+  }
+  for (const [muscle, ids] of Object.entries(idsMap) as [import('../types').IndividualMuscle, string[]][]) {
+    if (!ids?.length) continue;
+    const item = byMuscle[muscle];
+    const color = item ? hmColor(item.recovery) : NEUTRAL;
+    for (const id of ids) colorMap.set(id, color);
+  }
+  const rules = [...colorMap.entries()].map(
+    ([id, color]) => `#${id},#${id} path,#${id} ellipse,#${id} rect,#${id} circle{fill:${color}}`,
+  );
+  const sized = raw
+    .replace(/(\s)width="[^"]*"/, '$1width="100%"')
+    .replace(/\sheight="[^"]*"/, '');
+  return sized.replace(/(<svg[^>]*>)/, `$1<style>${rules.join('')}</style>`);
+}
+
+function BodyHeatmap({ muscleRecovery }: { muscleRecovery: MuscleRecoveryItem[] }) {
+  const byMuscle = useMemo(
+    () => Object.fromEntries(muscleRecovery.map(m => [m.muscle, m])) as Partial<Record<import('../types').IndividualMuscle, MuscleRecoveryItem>>,
+    [muscleRecovery],
+  );
+  const frontHtml = useMemo(() => colorSvg(frontSvgRaw, FRONT_IDS, byMuscle), [byMuscle]);
+  const backHtml  = useMemo(() => colorSvg(backSvgRaw, BACK_IDS, byMuscle), [byMuscle]);
+
+  const readyCount = muscleRecovery.filter(m => m.recovery >= 75).length;
+  const recoveringCount = muscleRecovery.length - readyCount;
+
+  const readyRegions = HEATMAP_REGIONS
+    .filter(region => {
+      const items = region.muscles.map(m => byMuscle[m]).filter(Boolean) as MuscleRecoveryItem[];
+      if (!items.length) return true;
+      return Math.round(items.reduce((s, m) => s + m.recovery, 0) / items.length) >= 75;
+    })
+    .map(r => r.label);
+  const suggestion = readyRegions.length === 0
+    ? 'Rest or active recovery'
+    : readyRegions.length === HEATMAP_REGIONS.length
+    ? 'Full body ready'
+    : readyRegions.join(' · ') + ' recommended';
+
+  return (
+    <section className="rounded-[28px] border border-iron-800 bg-iron-900 p-4">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="font-black text-white">Muscle recovery</p>
+          <p className="mt-0.5 text-xs text-iron-500">{readyCount} ready · {recoveringCount} recovering</p>
+        </div>
+        <ShieldCheck size={20} className="text-volt-400 flex-shrink-0" />
+      </div>
+
+      <div className="mt-2 flex items-center gap-1.5 rounded-xl bg-iron-950 px-3 py-2">
+        <Zap size={12} className="flex-shrink-0 text-volt-400" />
+        <p className="text-[11px] font-bold text-iron-300">{suggestion}</p>
+      </div>
+
+      <div className="mt-3 flex justify-center gap-4 text-[10px] text-iron-500">
+        <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-2 rounded-full bg-[#d4f52a]" />Ready</span>
+        <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-2 rounded-full bg-[#fbbf24]" />Recovering</span>
+        <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-2 rounded-full bg-[#f87171]" />Fatigued</span>
+        <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-2 rounded-full bg-[#374151]" />Rested</span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div>
+          <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-iron-500">Front</p>
+          <div dangerouslySetInnerHTML={{ __html: frontHtml }} className="w-full" />
+        </div>
+        <div>
+          <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-iron-500">Back</p>
+          <div dangerouslySetInnerHTML={{ __html: backHtml }} className="w-full" />
+        </div>
+      </div>
+    </section>
   );
 }
 

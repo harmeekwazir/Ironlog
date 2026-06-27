@@ -5,14 +5,16 @@ import type { Exercise, MuscleGroup } from '../../types';
 import { generateId } from '../../utils';
 
 const CATEGORIES: { key: MuscleGroup | 'all'; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'chest', label: 'Chest' },
-  { key: 'back', label: 'Back' },
-  { key: 'legs', label: 'Legs' },
+  { key: 'all',       label: 'All' },
+  { key: 'chest',     label: 'Chest' },
+  { key: 'back',      label: 'Back' },
+  { key: 'legs',      label: 'Legs' },
   { key: 'shoulders', label: 'Shoulders' },
-  { key: 'arms', label: 'Arms' },
-  { key: 'core', label: 'Core' },
-  { key: 'cardio', label: 'Cardio' },
+  { key: 'biceps',    label: 'Biceps' },
+  { key: 'triceps',   label: 'Triceps' },
+  { key: 'forearms',  label: 'Forearms' },
+  { key: 'core',      label: 'Core' },
+  { key: 'cardio',    label: 'Cardio' },
 ];
 
 interface Props {
@@ -23,7 +25,8 @@ interface Props {
 function getCategoryEmoji(category: string): string {
   const emojis: Record<string, string> = {
     chest: '💪', back: '🏋️', legs: '🦵', shoulders: '🔝',
-    arms: '💪', core: '🎯', cardio: '🏃', full_body: '🔥',
+    biceps: '💪', triceps: '💪', forearms: '🤜', arms: '💪',
+    core: '🎯', cardio: '🏃', full_body: '🔥', 'full-body': '🔥',
   };
   return emojis[category] || '💪';
 }
