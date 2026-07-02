@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:https": "vite --host --mode https",
+    "dev:https": "vite --host 0.0.0.0 --mode https",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

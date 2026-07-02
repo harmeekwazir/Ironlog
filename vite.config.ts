@@ -19,27 +19,31 @@ export default defineConfig(({ mode }) => ({
       },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
-        name: 'IronLog – Workout Tracker',
+        id: '/',
+        name: 'IronLog - Workout Tracker',
         short_name: 'IronLog',
         description: 'Local-first workout tracker for serious lifters',
         theme_color: '#0a0a0a',
         background_color: '#0a0a0a',
+        display_override: ['standalone', 'minimal-ui'],
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
         scope: '/',
+        categories: ['health', 'fitness', 'productivity'],
+        prefer_related_applications: false,
         icons: [
           {
             src: 'pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png',
-            purpose: 'any'
+            purpose: 'any maskable'
           },
           {
             src: 'pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any'
+            purpose: 'any maskable'
           }
         ]
       },
