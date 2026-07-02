@@ -334,7 +334,7 @@ function OverloadCard({ suggestion: s }: { suggestion: OverloadSuggestion }) {
   );
 }
 
-type MuscleRecoveryItem = { muscle: import('../types').IndividualMuscle; stress: number; recovery: number; hoursUntilReady: number };
+type MuscleRecoveryItem = { muscle: import('../types').IndividualMuscle; stress: number; fitness: number; recovery: number; hoursUntilReady: number };
 
 const FRONT_IDS: Partial<Record<import('../types').IndividualMuscle, string[]>> = {
   chest:       ['chest'],
@@ -372,7 +372,30 @@ const HEATMAP_REGIONS = [
   { label: 'Core', muscles: ['abs'] as import('../types').IndividualMuscle[] },
 ];
 
-function hmColor(r: number) { return r >= 75 ? '#d4f52a' : r >= 45 ? '#fbbf24' : '#f87171'; }
+// Continuous 3-stop gradient (fatigued → recovering → ready) instead of flat buckets, so
+// 52% and 71% read as visibly different shades rather than both showing as amber.
+const HM_STOPS: [number, [number, number, number]][] = [
+  [0, [248, 113, 113]],   // red-400 — fatigued
+  [50, [251, 191, 36]],   // amber-400 — recovering
+  [100, [212, 245, 42]],  // volt-400 — ready
+];
+
+function hmColor(r: number): string {
+  const clamped = Math.max(0, Math.min(100, r));
+  let lo = HM_STOPS[0], hi = HM_STOPS[HM_STOPS.length - 1];
+  for (let i = 0; i < HM_STOPS.length - 1; i++) {
+    if (clamped >= HM_STOPS[i][0] && clamped <= HM_STOPS[i + 1][0]) {
+      lo = HM_STOPS[i];
+      hi = HM_STOPS[i + 1];
+      break;
+    }
+  }
+  const t = hi[0] === lo[0] ? 0 : (clamped - lo[0]) / (hi[0] - lo[0]);
+  const [r1, g1, b1] = lo[1];
+  const [r2, g2, b2] = hi[1];
+  const mix = (a: number, b: number) => Math.round(a + (b - a) * t);
+  return `rgb(${mix(r1, r2)},${mix(g1, g2)},${mix(b1, b2)})`;
+}
 
 function colorSvg(
   raw: string,
@@ -408,7 +431,8 @@ function BodyHeatmap({ muscleRecovery }: { muscleRecovery: MuscleRecoveryItem[] 
   const backHtml  = useMemo(() => colorSvg(backSvgRaw, BACK_IDS, byMuscle), [byMuscle]);
 
   const readyCount = muscleRecovery.filter(m => m.recovery >= 75).length;
-  const recoveringCount = muscleRecovery.length - readyCount;
+  const fatiguedCount = muscleRecovery.filter(m => m.recovery < 45).length;
+  const recoveringCount = muscleRecovery.length - readyCount - fatiguedCount;
 
   const readyRegions = HEATMAP_REGIONS
     .filter(region => {
@@ -428,7 +452,7 @@ function BodyHeatmap({ muscleRecovery }: { muscleRecovery: MuscleRecoveryItem[] 
       <div className="flex items-start justify-between">
         <div>
           <p className="font-black text-white">Muscle recovery</p>
-          <p className="mt-0.5 text-xs text-iron-500">{readyCount} ready · {recoveringCount} recovering</p>
+          <p className="mt-0.5 text-xs text-iron-500">{readyCount} ready · {recoveringCount} recovering · {fatiguedCount} fatigued</p>
         </div>
         <ShieldCheck size={20} className="text-volt-400 flex-shrink-0" />
       </div>
@@ -438,11 +462,16 @@ function BodyHeatmap({ muscleRecovery }: { muscleRecovery: MuscleRecoveryItem[] 
         <p className="text-[11px] font-bold text-iron-300">{suggestion}</p>
       </div>
 
-      <div className="mt-3 flex justify-center gap-4 text-[10px] text-iron-500">
-        <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-2 rounded-full bg-[#d4f52a]" />Ready</span>
-        <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-2 rounded-full bg-[#fbbf24]" />Recovering</span>
-        <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-2 rounded-full bg-[#f87171]" />Fatigued</span>
-        <span className="flex items-center gap-1.5"><i className="inline-block h-2 w-2 rounded-full bg-[#374151]" />Rested</span>
+      <div className="mt-3">
+        <div className="h-2 w-full rounded-full" style={{ background: 'linear-gradient(90deg, #f87171 0%, #fbbf24 50%, #d4f52a 100%)' }} />
+        <div className="mt-1 flex items-center justify-between text-[10px] font-semibold text-iron-500">
+          <span>Fatigued</span>
+          <span>Recovering</span>
+          <span>Ready</span>
+        </div>
+        <div className="mt-1.5 flex justify-center">
+          <span className="flex items-center gap-1.5 text-[10px] text-iron-500"><i className="inline-block h-2 w-2 rounded-full bg-[#374151]" />No data yet</span>
+        </div>
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">

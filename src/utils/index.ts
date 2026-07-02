@@ -229,19 +229,31 @@ export function calcMuscleStress(workout: Workout, exercises: Record<string, Exe
   return totals;
 }
 
-// τ_stress = 7: at stress=2.0 recovery≈75%, at stress=7 recovery≈37%, at stress=14 recovery≈14%
-// τ_time  = 30h: half-life ≈20h so a hard session stays amber for ~48h, ready at ~60h
-const TAU_STRESS = 7;
-const TAU_TIME   = 30;
-// stress level at which recovery == 75% (the "ready" threshold)
-const STRESS_AT_75 = TAU_STRESS * -Math.log(0.75); // ≈ 2.01
+// Fatigue half-life varies by muscle — small/peripheral muscles clear stress faster than
+// large or posterior-chain muscles that see heavier absolute loads and more DOMS.
+const MUSCLE_TAU_TIME: Record<IndividualMuscle, number> = {
+  forearms: 18, calves: 20, abs: 20, side_delts: 22, rear_delts: 22, biceps: 24,
+  triceps: 26, front_delts: 26, chest: 28, upper_back: 28, glutes: 30,
+  lats: 32, quads: 34, hamstrings: 36, lower_back: 38,
+};
+
+// τ_stress = 7 (baseline): at stress=2.0 recovery≈75%, at stress=7 recovery≈37%, at stress=14 recovery≈14%
+const TAU_STRESS_BASE = 7;
+
+// "Fitness" = chronic training exposure per muscle, decayed over a ~4-week window — the slow
+// side of a Banister fitness/fatigue split. A muscle trained consistently tolerates more
+// stress before its recovery% drops (real adaptation), modeled here as a stretch on τ_stress
+// (up to +50%), so the same raw stress reads as "more recovered" for a well-trained muscle.
+const TAU_FITNESS = 24 * 28;
+const FITNESS_REF = 8;
+const ADAPTATION_MAX = 0.5;
 
 export function getMuscleRecovery(workouts: Workout[], exercises?: Record<string, Exercise>, now = Date.now()) {
-  const remaining: Partial<Record<IndividualMuscle, number>> = {};
+  const fatigue: Partial<Record<IndividualMuscle, number>> = {};
+  const fitness: Partial<Record<IndividualMuscle, number>> = {};
   for (const workout of workouts) {
     if (!workout.completedAt) continue;
     const hours = Math.max(0, (now - workout.completedAt) / 3600000);
-    const decay = Math.exp(-hours / TAU_TIME);
     // Prefer live recomputation when exercises are available so formula changes
     // apply retroactively; fall back to stored muscleStress for workouts with no exercises map
     const stressMap = exercises
@@ -249,16 +261,22 @@ export function getMuscleRecovery(workouts: Workout[], exercises?: Record<string
       : workout.muscleStress;
     if (!stressMap) continue;
     for (const [muscle, stress] of Object.entries(stressMap) as [IndividualMuscle, number][]) {
-      remaining[muscle] = (remaining[muscle] ?? 0) + stress * decay;
+      fatigue[muscle] = (fatigue[muscle] ?? 0) + stress * Math.exp(-hours / MUSCLE_TAU_TIME[muscle]);
+      fitness[muscle] = (fitness[muscle] ?? 0) + stress * Math.exp(-hours / TAU_FITNESS);
     }
   }
   return INDIVIDUAL_MUSCLES.map(muscle => {
-    const stress = remaining[muscle] ?? 0;
-    const recovery = Math.round(100 * Math.exp(-stress / TAU_STRESS));
-    const hoursUntilReady = stress > STRESS_AT_75
-      ? Math.ceil(-TAU_TIME * Math.log(STRESS_AT_75 / stress))
+    const stress = fatigue[muscle] ?? 0;
+    const fitnessLevel = fitness[muscle] ?? 0;
+    const adaptation = ADAPTATION_MAX * (1 - Math.exp(-fitnessLevel / FITNESS_REF));
+    const tauStress = TAU_STRESS_BASE * (1 + adaptation);
+    const tauTime = MUSCLE_TAU_TIME[muscle];
+    const recovery = Math.round(100 * Math.exp(-stress / tauStress));
+    const stressAt75 = tauStress * -Math.log(0.75);
+    const hoursUntilReady = stress > stressAt75
+      ? Math.ceil(-tauTime * Math.log(stressAt75 / stress))
       : 0;
-    return { muscle, stress, recovery, hoursUntilReady };
+    return { muscle, stress, fitness: fitnessLevel, recovery, hoursUntilReady };
   });
 }
 
