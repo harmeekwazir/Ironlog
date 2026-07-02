@@ -1,4 +1,4 @@
-import { Home, Dumbbell, BarChart2, Clock, BookOpen } from 'lucide-react';
+import { Home, Dumbbell, BarChart2, Clock, Sparkles } from 'lucide-react';
 import { useNav, type Page } from '../../store/nav';
 import { useActiveWorkout } from '../../store/activeWorkout';
 
@@ -7,7 +7,7 @@ const navItems: { page: Page; icon: React.ElementType; label: string }[] = [
   { page: 'history', icon: Clock, label: 'History' },
   { page: 'workout', icon: Dumbbell, label: 'Train' },
   { page: 'analytics', icon: BarChart2, label: 'Stats' },
-  { page: 'exercises', icon: BookOpen, label: 'Exercises' },
+  { page: 'suggested', icon: Sparkles, label: 'Suggested' },
 ];
 
 export function BottomNav() {

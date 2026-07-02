@@ -1,4 +1,4 @@
-import type { Exercise, IndividualMuscle, MuscleGroup, OverloadSuggestion, PersonalRecord, ReadinessCheck, WeeklyReport, WorkoutSet, WorkoutExercise, Workout } from '../types';
+import type { Exercise, IndividualMuscle, MuscleGroup, MuscleSplit, OverloadSuggestion, PersonalRecord, ReadinessCheck, SuggestedExercise, WeeklyReport, WorkoutSet, WorkoutExercise, WorkoutSuggestion, Workout } from '../types';
 
 export const INDIVIDUAL_MUSCLES: IndividualMuscle[] = [
   'chest', 'front_delts', 'side_delts', 'rear_delts', 'lats',
@@ -22,6 +22,28 @@ export const MUSCLE_LABELS: Record<IndividualMuscle, string> = {
   glutes: 'Glutes',
   calves: 'Calves',
   abs: 'Abs',
+};
+
+// Canonical push/pull/legs/core grouping — muscles conventionally trained in the same
+// session. Shared by the recovery heatmap and the workout suggestion engine so "what
+// belongs together" is defined in exactly one place.
+export const MUSCLE_SPLITS: Record<MuscleSplit, IndividualMuscle[]> = {
+  push: ['chest', 'front_delts', 'side_delts', 'triceps'],
+  pull: ['lats', 'upper_back', 'rear_delts', 'biceps', 'forearms', 'lower_back'],
+  legs: ['quads', 'hamstrings', 'glutes', 'calves'],
+  core: ['abs'],
+};
+
+export const SPLIT_LABELS: Record<MuscleSplit, string> = { push: 'Push', pull: 'Pull', legs: 'Legs', core: 'Core' };
+
+// Which Exercise.category values feed the exercise pool for each split. 'arms' is a
+// catch-all category some exercises use for either biceps or triceps work, so it's a
+// candidate for both push and pull rather than committed to one.
+const SPLIT_CATEGORIES: Record<MuscleSplit, MuscleGroup[]> = {
+  push: ['chest', 'shoulders', 'triceps'],
+  pull: ['back', 'biceps', 'forearms'],
+  legs: ['legs'],
+  core: ['core'],
 };
 
 // Brzycki formula, intentionally shown only for sets at or above 10 reps.
@@ -394,14 +416,12 @@ export function startOfMonth(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
 }
 
-export function getOverloadSuggestions(
-  workouts: Workout[],
-  exercises: Record<string, Exercise>,
-  limit = 10,
-): OverloadSuggestion[] {
+// Per-exercise history of top-set weight/reps for each completed session — the basis for
+// progression suggestions. Only counts sets with weight > 0, so bodyweight-only exercises
+// never accumulate history here (see getExerciseLastTrained for a weight-agnostic version).
+function buildExerciseHistory(workouts: Workout[]): Record<string, { date: number; topWeight: number; topReps: number }[]> {
   const sorted = [...workouts].sort((a, b) => (a.completedAt ?? 0) - (b.completedAt ?? 0));
   const historyMap: Record<string, { date: number; topWeight: number; topReps: number }[]> = {};
-
   for (const workout of sorted) {
     if (!workout.completedAt) continue;
     for (const ex of workout.exercises) {
@@ -412,7 +432,32 @@ export function getOverloadSuggestions(
       historyMap[ex.exerciseId].push({ date: workout.completedAt, topWeight: topSet.weight, topReps: topSet.reps });
     }
   }
+  return historyMap;
+}
 
+// Session count + last-trained timestamp per exercise, regardless of weight — used to judge
+// familiarity/novelty for bodyweight exercises too (pull-ups, push-ups, ...).
+function getExerciseLastTrained(workouts: Workout[]): Record<string, { count: number; lastTrainedAt: number }> {
+  const map: Record<string, { count: number; lastTrainedAt: number }> = {};
+  for (const workout of workouts) {
+    if (!workout.completedAt) continue;
+    for (const ex of workout.exercises) {
+      if (!ex.sets.some(s => s.completed && s.type !== 'warmup')) continue;
+      const entry = map[ex.exerciseId] ?? { count: 0, lastTrainedAt: 0 };
+      entry.count += 1;
+      entry.lastTrainedAt = Math.max(entry.lastTrainedAt, workout.completedAt);
+      map[ex.exerciseId] = entry;
+    }
+  }
+  return map;
+}
+
+export function getOverloadSuggestions(
+  workouts: Workout[],
+  exercises: Record<string, Exercise>,
+  limit = 10,
+): OverloadSuggestion[] {
+  const historyMap = buildExerciseHistory(workouts);
   const results: OverloadSuggestion[] = [];
 
   for (const [exerciseId, history] of Object.entries(historyMap)) {
@@ -466,6 +511,153 @@ export function getOverloadSuggestions(
   }
 
   return results.sort((a, b) => b.lastTrainedAt - a.lastTrainedAt).slice(0, limit);
+}
+
+// Which split a given workout mostly trained, by summing its per-muscle stress into each
+// split and taking the largest. Used to avoid suggesting the same split two days running.
+function splitOfWorkout(workout: Workout, exercises: Record<string, Exercise>): MuscleSplit | null {
+  const stressMap = calcMuscleStress(workout, exercises);
+  const splitKeys = Object.keys(MUSCLE_SPLITS) as MuscleSplit[];
+  let best: MuscleSplit | null = null;
+  let bestStress = 0;
+  for (const split of splitKeys) {
+    const total = MUSCLE_SPLITS[split].reduce((sum, m) => sum + (stressMap[m] ?? 0), 0);
+    if (total > bestStress) { bestStress = total; best = split; }
+  }
+  return best;
+}
+
+/**
+ * Suggests today's workout split + exercise list. Rules, in order of precedence:
+ *
+ * 1. Recovery-gated split choice — rank push/pull/legs/core by average muscle recovery
+ *    (getMuscleRecovery) and lead with whichever is most ready.
+ * 2. Split rotation — if the top-recovered split is the one trained last session, rotate to
+ *    the next-best split instead, unless that alternative is itself still fatigued (<45%),
+ *    in which case repeating is the right call over forcing an undertrained split.
+ * 3. Safety gate — ACWR "High spike" or a fatigued chosen split (<45%) trims the session
+ *    (fewer exercises, fewer sets) rather than blocking training outright.
+ * 4. Within the split, muscles are filled in order of least-recovered-first (their limited
+ *    candidate pool matters most), one exercise per muscle, compound movements (more muscles
+ *    meaningfully activated) preferred over isolation.
+ * 5. Continuity — an exercise with logged history is preferred over one never tried, so the
+ *    progressive-overload engine has real numbers to suggest. But an exercise whose
+ *    progression has stalled, or that was used in the immediately previous session, is
+ *    deprioritized in favor of a fresh candidate for the same muscle (novelty/variation).
+ */
+export function getWorkoutSuggestion(
+  workouts: Workout[],
+  exercises: Record<string, Exercise>,
+  now = Date.now(),
+): WorkoutSuggestion | null {
+  const exerciseList = Object.values(exercises);
+  if (!exerciseList.length) return null;
+
+  const splitKeys = Object.keys(MUSCLE_SPLITS) as MuscleSplit[];
+  const recoveryByMuscle = Object.fromEntries(
+    getMuscleRecovery(workouts, exercises, now).map(r => [r.muscle, r.recovery]),
+  ) as Record<IndividualMuscle, number>;
+  const avgRecoveryBySplit = Object.fromEntries(
+    splitKeys.map(split => {
+      const muscles = MUSCLE_SPLITS[split];
+      const avg = muscles.reduce((sum, m) => sum + (recoveryByMuscle[m] ?? 100), 0) / muscles.length;
+      return [split, Math.round(avg)];
+    }),
+  ) as Record<MuscleSplit, number>;
+
+  const completed = [...workouts].filter(w => w.completedAt).sort((a, b) => b.completedAt! - a.completedAt!);
+  const lastWorkout = completed[0];
+  const lastSplit = lastWorkout ? splitOfWorkout(lastWorkout, exercises) : null;
+
+  const ranked = [...splitKeys].sort((a, b) => avgRecoveryBySplit[b] - avgRecoveryBySplit[a]);
+  let chosen = ranked[0];
+  let rotatedFrom: MuscleSplit | null = null;
+  if (chosen === lastSplit && ranked.length > 1 && avgRecoveryBySplit[ranked[1]] >= 45) {
+    rotatedFrom = chosen;
+    chosen = ranked[1];
+  }
+
+  const acwr = getAcwr(workouts, now);
+  const loadAdvice: WorkoutSuggestion['loadAdvice'] =
+    acwr.status === 'High spike' || avgRecoveryBySplit[chosen] < 45 ? 'reduce'
+    : avgRecoveryBySplit[chosen] < 60 ? 'light'
+    : 'normal';
+  const maxExercises = loadAdvice === 'reduce' ? 3 : loadAdvice === 'light' ? 4 : 5;
+  const setsPerExercise = loadAdvice === 'reduce' ? 2 : 3;
+
+  const overloadMap = Object.fromEntries(getOverloadSuggestions(workouts, exercises, Infinity).map(s => [s.exerciseId, s]));
+  const lastTrained = getExerciseLastTrained(workouts);
+  const lastWorkoutExerciseIds = new Set(lastWorkout?.exercises.map(e => e.exerciseId) ?? []);
+  const splitMuscles = MUSCLE_SPLITS[chosen];
+
+  const candidates = exerciseList
+    .filter(ex => SPLIT_CATEGORIES[chosen].includes(ex.category) || ex.category === 'arms')
+    .map(ex => {
+      const dist = EXERCISE_MUSCLES[ex.id] ?? fallbackMuscles(ex);
+      const entries = Object.entries(dist) as [IndividualMuscle, number][];
+      const inSplit = entries.filter(([m]) => splitMuscles.includes(m));
+      if (!inSplit.length) return null;
+      const primary = inSplit.reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0];
+      const compoundness = entries.filter(([, frac]) => frac >= 0.15).length;
+      return { ex, primary, compoundness };
+    })
+    .filter((c): c is { ex: Exercise; primary: IndividualMuscle; compoundness: number } => c !== null);
+
+  const rankCandidate = (c: { ex: Exercise; compoundness: number }) => {
+    let score = c.compoundness * 0.5;
+    if (lastTrained[c.ex.id]) score += 2;
+    if (lastWorkoutExerciseIds.has(c.ex.id)) score -= 1.5;
+    if (overloadMap[c.ex.id]?.trend === 'stalled') score -= 1;
+    return score;
+  };
+
+  const picked: { ex: Exercise; primary: IndividualMuscle; compoundness: number }[] = [];
+  const muscleOrder = [...splitMuscles].sort((a, b) => (recoveryByMuscle[a] ?? 100) - (recoveryByMuscle[b] ?? 100));
+  for (const muscle of muscleOrder) {
+    if (picked.length >= maxExercises) break;
+    const pool = candidates.filter(c => c.primary === muscle && !picked.some(p => p.ex.id === c.ex.id));
+    if (!pool.length) continue;
+    pool.sort((a, b) => rankCandidate(b) - rankCandidate(a));
+    picked.push(pool[0]);
+  }
+  if (picked.length < maxExercises) {
+    const remaining = candidates
+      .filter(c => !picked.some(p => p.ex.id === c.ex.id))
+      .sort((a, b) => rankCandidate(b) - rankCandidate(a));
+    for (const cand of remaining) {
+      if (picked.length >= maxExercises) break;
+      picked.push(cand);
+    }
+  }
+  picked.sort((a, b) => b.compoundness - a.compoundness);
+
+  const suggestedExercises: SuggestedExercise[] = picked.map(p => {
+    const overload = overloadMap[p.ex.id];
+    return {
+      exerciseId: p.ex.id,
+      exerciseName: p.ex.name,
+      primaryMuscle: p.primary,
+      sets: setsPerExercise,
+      targetReps: overload ? String(overload.suggestedReps) : '8-12',
+      suggestedWeight: overload?.suggestedWeight,
+      isFamiliar: !!lastTrained[p.ex.id],
+    };
+  });
+
+  const reason = chosen === lastSplit
+    ? `Every other split is still recovering, so ${SPLIT_LABELS[chosen]} is your best option even after last session.`
+    : rotatedFrom
+      ? `${SPLIT_LABELS[rotatedFrom]} tested more recovered, but you just trained it — ${SPLIT_LABELS[chosen]} is next best (${avgRecoveryBySplit[chosen]}% avg).`
+      : `${SPLIT_LABELS[chosen]} muscles are your most recovered right now (${avgRecoveryBySplit[chosen]}% avg).`;
+
+  return {
+    split: chosen,
+    label: SPLIT_LABELS[chosen],
+    reason,
+    avgRecovery: avgRecoveryBySplit[chosen],
+    loadAdvice,
+    exercises: suggestedExercises,
+  };
 }
 
 export function getWeeklyReport(

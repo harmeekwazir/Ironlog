@@ -168,3 +168,26 @@ export interface WeeklyReport {
   topExercise: { name: string; volume: number } | null;
   muscleGroupsHit: number;
 }
+
+// Canonical "trained together" muscle groupings — the same taxonomy drives the recovery
+// heatmap regions and the workout suggestion engine so both agree on what counts as a split.
+export type MuscleSplit = 'push' | 'pull' | 'legs' | 'core';
+
+export interface SuggestedExercise {
+  exerciseId: string;
+  exerciseName: string;
+  primaryMuscle: IndividualMuscle;
+  sets: number;
+  targetReps: string;
+  suggestedWeight?: number;
+  isFamiliar: boolean;
+}
+
+export interface WorkoutSuggestion {
+  split: MuscleSplit;
+  label: string;
+  reason: string;
+  avgRecovery: number;
+  loadAdvice: 'normal' | 'light' | 'reduce';
+  exercises: SuggestedExercise[];
+}

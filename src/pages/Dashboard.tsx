@@ -7,10 +7,10 @@ import { eachDayOfInterval, format, isToday, startOfDay, subDays } from 'date-fn
 import { db } from '../db';
 import { useActiveWorkout } from '../store/activeWorkout';
 import { useNav } from '../store/nav';
-import type { Exercise, OverloadSuggestion, PersonalRecord, ReadinessCheck, WeeklyReport, Workout } from '../types';
+import type { Exercise, MuscleSplit, OverloadSuggestion, PersonalRecord, ReadinessCheck, WeeklyReport, Workout } from '../types';
 import {
   calcWorkoutVolume, formatDuration, getAcwr, getMuscleRecovery,
-  getOverloadSuggestions, getReadinessLabel, getWeeklyReport, MUSCLE_LABELS,
+  getOverloadSuggestions, getReadinessLabel, getWeeklyReport, MUSCLE_LABELS, MUSCLE_SPLITS, SPLIT_LABELS,
 } from '../utils';
 import frontSvgRaw from '../assets/front.svg?raw';
 import backSvgRaw from '../assets/Back.svg?raw';
@@ -365,12 +365,10 @@ const BACK_IDS: Partial<Record<import('../types').IndividualMuscle, string[]>> =
   abs:        ['abs-obliques'],
 };
 
-const HEATMAP_REGIONS = [
-  { label: 'Push', muscles: ['chest', 'front_delts', 'side_delts', 'triceps'] as import('../types').IndividualMuscle[] },
-  { label: 'Pull', muscles: ['lats', 'upper_back', 'rear_delts', 'biceps', 'forearms', 'lower_back'] as import('../types').IndividualMuscle[] },
-  { label: 'Legs', muscles: ['quads', 'hamstrings', 'glutes', 'calves'] as import('../types').IndividualMuscle[] },
-  { label: 'Core', muscles: ['abs'] as import('../types').IndividualMuscle[] },
-];
+const HEATMAP_REGIONS = (Object.keys(MUSCLE_SPLITS) as MuscleSplit[]).map(split => ({
+  label: SPLIT_LABELS[split],
+  muscles: MUSCLE_SPLITS[split],
+}));
 
 // Continuous 3-stop gradient (fatigued → recovering → ready) instead of flat buckets, so
 // 52% and 71% read as visibly different shades rather than both showing as amber.

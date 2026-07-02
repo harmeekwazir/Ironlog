@@ -10,6 +10,7 @@ import { ExercisesPage } from './pages/ExercisesPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { SuggestedWorkoutPage } from './pages/SuggestedWorkoutPage';
 import { seedExercises } from './db';
 
 function PageRouter() {
@@ -22,6 +23,7 @@ function PageRouter() {
     case 'analytics': return <AnalyticsPage />;
     case 'settings': return <SettingsPage />;
     case 'profile': return <ProfilePage />;
+    case 'suggested': return <SuggestedWorkoutPage />;
     default: return <Dashboard />;
   }
 }

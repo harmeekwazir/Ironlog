@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type Page = 'dashboard' | 'workout' | 'history' | 'exercises' | 'analytics' | 'settings' | 'profile';
+export type Page = 'dashboard' | 'workout' | 'history' | 'exercises' | 'analytics' | 'settings' | 'profile' | 'suggested';
 
 interface NavState {
   page: Page;

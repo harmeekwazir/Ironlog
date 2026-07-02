@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, Upload, Trash2, Database, Info, ChevronRight, Shield, Smartphone, User, Settings2, Volume2, VolumeX, Vibrate } from 'lucide-react';
+import { Download, Upload, Trash2, Database, Info, ChevronRight, Shield, Smartphone, User, Settings2, Volume2, VolumeX, Vibrate, BookOpen } from 'lucide-react';
 import { db } from '../db';
 import { useNav } from '../store/nav';
 import { useProfile } from '../store/profile';
@@ -145,6 +145,18 @@ export function SettingsPage() {
                 <p className="text-iron-500 text-xs">Weight {profile.weightKg} kg · Height {profile.heightCm} cm · Goal {profile.goal}</p>
               </div>
               <Settings2 size={16} className="text-iron-500" />
+            </div>
+          </button>
+          <button onClick={() => setPage('exercises')} className="w-full bg-iron-900 rounded-2xl border border-iron-800 p-4 text-left hover:border-volt-400/30 transition-colors mt-2">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-volt-400/10 flex items-center justify-center text-volt-300">
+                <BookOpen size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-semibold text-sm">Exercise library</p>
+                <p className="text-iron-500 text-xs">Browse, search & add custom exercises</p>
+              </div>
+              <ChevronRight size={16} className="text-iron-500" />
             </div>
           </button>
         </div>

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Search, Plus, X, Trash2, ChevronRight, Dumbbell } from 'lucide-react';
+import { Search, Plus, X, Trash2, ChevronRight, ChevronLeft, Dumbbell } from 'lucide-react';
 import { db } from '../db';
 import type { Exercise, MuscleGroup } from '../types';
 import { generateId } from '../utils';
+import { useNav } from '../store/nav';
 
 const CATEGORIES: { key: MuscleGroup | 'all'; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -17,6 +18,7 @@ const CATEGORIES: { key: MuscleGroup | 'all'; label: string }[] = [
 const EQUIPMENT_OPTIONS = ['barbell', 'dumbbell', 'cable', 'machine', 'bodyweight', 'kettlebell', 'bands', 'other'];
 
 export function ExercisesPage() {
+  const { setPage } = useNav();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<MuscleGroup | 'all'>('all');
@@ -116,6 +118,7 @@ export function ExercisesPage() {
     <div className="flex flex-col min-h-full pb-24">
       <div className="sticky top-0 z-10 bg-iron-950/95 backdrop-blur border-b border-iron-800">
         <div className="px-4 pt-12 pb-3 flex items-center gap-3">
+          <button onClick={() => setPage('settings')} className="w-8 h-8 flex items-center justify-center rounded-full text-iron-400 -ml-1.5" aria-label="Back to settings"><ChevronLeft size={22} /></button>
           <h1 className="flex-1 text-2xl font-black text-white">Exercises</h1>
           <button onClick={() => setShowCreate(s => !s)} className="flex items-center gap-1 px-3 py-2 rounded-xl bg-volt-400/10 text-volt-400 text-sm font-semibold">
             <Plus size={14} /> New
