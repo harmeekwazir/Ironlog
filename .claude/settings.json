@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx eslint *)",
+      "Bash(npx tsc *)",
+      "Bash(node drive-tmp3.cjs)",
+      "Bash(node drive-tmp4.cjs)",
+      "Bash(rm -f drive-tmp*.cjs shot-*.png)",
+      "Bash(pkill -f vite)",
+      "Bash(node drive-tmp5.cjs)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
+    ]
+  }
+}
