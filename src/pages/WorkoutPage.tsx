@@ -36,7 +36,7 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
 
 export function WorkoutPage() {
   const {
-    workout, startWorkout, addExercise, removeExercise, addSet, updateSet,
+    workout, startWorkout, addExercise, removeExercise, addSet, removeSet, updateSet,
     completeSet, finishWorkout, discardWorkout, updateWorkoutName,
   } = useActiveWorkout();
   const { setPage } = useNav();
@@ -298,8 +298,8 @@ export function WorkoutPage() {
                 })}
                 className="w-full flex items-center gap-3 p-4 text-left"
               >
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black ${complete === item.sets.length ? 'bg-volt-400 text-iron-950' : 'bg-iron-800 text-iron-300'}`}>
-                  {complete === item.sets.length ? <Check size={17} /> : exerciseIndex + 1}
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black ${item.sets.length > 0 && complete === item.sets.length ? 'bg-volt-400 text-iron-950' : 'bg-iron-800 text-iron-300'}`}>
+                  {item.sets.length > 0 && complete === item.sets.length ? <Check size={17} /> : exerciseIndex + 1}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="truncate text-sm font-bold text-white">{exercise?.name ?? 'Exercise'}</p>
@@ -314,6 +314,11 @@ export function WorkoutPage() {
               {isOpen && (
                 <div className="border-t border-iron-800 px-3 pb-3">
                   <div className="space-y-2 pt-3">
+                    {item.sets.length === 0 && (
+                      <div className="rounded-2xl border border-dashed border-iron-700 px-4 py-5 text-center">
+                        <p className="text-sm font-semibold text-iron-300">No sets yet</p>
+                      </div>
+                    )}
                     {item.sets.map((set, setIndex) => (
                       <SetRow
                         key={set.id}
@@ -321,11 +326,12 @@ export function WorkoutPage() {
                         setIndex={setIndex}
                         onUpdate={updates => updateSet(exerciseIndex, setIndex, updates)}
                         onComplete={() => completeSet(exerciseIndex, setIndex)}
+                        onRemove={() => removeSet(exerciseIndex, setIndex)}
                       />
                     ))}
                   </div>
                   <div className="flex gap-2 overflow-x-auto pt-3 scrollbar-hide">
-                    {(['working', 'warmup', 'dropset', 'failure', 'amrap'] as SetType[]).map(type => (
+                    {SET_TYPES.map(type => (
                       <button key={type} onClick={() => addSet(exerciseIndex, type)} className="flex shrink-0 items-center gap-1 rounded-xl bg-iron-800 px-3 py-2 text-xs font-semibold text-iron-300">
                         <Plus size={12} /> {getSetTypeLabel(type)}
                       </button>
@@ -482,15 +488,27 @@ function BottomSheet({ children, onClose }: { children: React.ReactNode; onClose
   );
 }
 
-function SetRow({ set, setIndex, onUpdate, onComplete }: {
+function SetRow({ set, setIndex, onUpdate, onComplete, onRemove }: {
   set: WorkoutSet;
   setIndex: number;
   onUpdate: (updates: Partial<WorkoutSet>) => void;
   onComplete: () => void;
+  onRemove: () => void;
 }) {
   const [typeOpen, setTypeOpen] = useState(false);
   const e1rm = estimate1RM(set.weight, set.reps);
-  const stress = ((set.rpe ?? 7) * Math.max(0.65, Math.min(1.35, set.reps / 10))).toFixed(1);
+  const config = SET_TYPE_CONFIG[set.type];
+  const stress = ((set.rpe ?? config.defaultRpe) * Math.max(0.65, Math.min(1.35, set.reps / 10))).toFixed(1);
+  const changeType = (type: SetType) => {
+    const next = SET_TYPE_CONFIG[type];
+    onUpdate({
+      type,
+      rpe: set.rpe ?? next.defaultRpe,
+      restSeconds: next.restSeconds,
+      tempo: type === 'tempo' ? (set.tempo ?? '3-1-1') : undefined,
+    });
+    setTypeOpen(false);
+  };
 
   return (
     <div className={`rounded-2xl border p-3 transition-colors ${set.completed ? 'border-volt-400/25 bg-volt-400/5' : 'border-iron-800 bg-iron-950/70'}`}>
@@ -502,7 +520,7 @@ function SetRow({ set, setIndex, onUpdate, onComplete }: {
           {typeOpen && (
             <div className="absolute left-0 top-full z-20 mt-1 min-w-36 rounded-xl border border-iron-700 bg-iron-800 p-1 shadow-xl">
               {SET_TYPES.map(type => (
-                <button key={type} onClick={() => { onUpdate({ type }); setTypeOpen(false); }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-iron-200 hover:bg-iron-700">
+                <button key={type} onClick={() => changeType(type)} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-iron-200 hover:bg-iron-700">
                   {getSetTypeLabel(type)}
                 </button>
               ))}
@@ -511,6 +529,13 @@ function SetRow({ set, setIndex, onUpdate, onComplete }: {
         </div>
         <span className="flex-1 text-xs font-bold text-iron-500">Set {setIndex + 1}</span>
         <span className="text-[10px] text-iron-600">stress {stress}</span>
+        <button
+          onClick={onRemove}
+          className="flex h-8 w-8 items-center justify-center rounded-xl bg-iron-800 text-iron-500 hover:text-red-400"
+          aria-label={`Remove set ${setIndex + 1}`}
+        >
+          <Trash2 size={13} />
+        </button>
         <motion.button
           onClick={onComplete}
           animate={set.completed ? { scale: [1, 1.3, 1] } : { scale: 1 }}
@@ -520,17 +545,106 @@ function SetRow({ set, setIndex, onUpdate, onComplete }: {
           <Check size={14} strokeWidth={3} />
         </motion.button>
       </div>
-      <div className="grid grid-cols-3 gap-2 mt-3">
-        <NumberField label="kg" value={set.weight} step={2.5} onChange={weight => onUpdate({ weight })} />
-        <NumberField label="reps" value={set.reps} step={1} onChange={reps => onUpdate({ reps })} />
-        <NumberField label="RPE" value={set.rpe ?? 7} step={0.5} min={1} max={10} onChange={rpe => onUpdate({ rpe })} />
+      <div className={`grid gap-2 mt-3 ${config.showTempo ? 'grid-cols-2' : 'grid-cols-3'}`}>
+        <NumberField label={config.weightLabel} value={set.weight} step={2.5} onChange={weight => onUpdate({ weight })} />
+        <NumberField label={config.repsLabel} value={set.reps} step={1} onChange={reps => onUpdate({ reps })} />
+        <NumberField label="RPE" value={set.rpe ?? config.defaultRpe} step={0.5} min={1} max={10} onChange={rpe => onUpdate({ rpe })} />
+        {config.showTempo && (
+          <TextField label="tempo" value={set.tempo ?? '3-1-1'} onChange={tempo => onUpdate({ tempo })} />
+        )}
+        {config.showRest && (
+          <NumberField label="rest sec" value={set.restSeconds ?? config.restSeconds} step={15} min={0} onChange={restSeconds => onUpdate({ restSeconds })} />
+        )}
       </div>
-      <p className="mt-2 h-4 text-right text-[10px] text-iron-600">
-        {e1rm ? `Brzycki e1RM ${e1rm} kg` : set.reps > 0 && set.reps < 10 ? 'e1RM starts at 10 reps' : ''}
+      <p className="mt-2 min-h-4 text-right text-[10px] text-iron-600">
+        {config.footer(set, e1rm)}
       </p>
     </div>
   );
 }
+
+const SET_TYPE_CONFIG: Record<SetType, {
+  defaultRpe: number;
+  restSeconds: number;
+  weightLabel: string;
+  repsLabel: string;
+  showTempo?: boolean;
+  showRest?: boolean;
+  footer: (set: WorkoutSet, e1rm: number | null) => string;
+}> = {
+  warmup: {
+    defaultRpe: 5,
+    restSeconds: 60,
+    weightLabel: 'kg',
+    repsLabel: 'reps',
+    showRest: true,
+    footer: () => 'Warm-up sets stay out of PR and volume targets',
+  },
+  working: {
+    defaultRpe: 7,
+    restSeconds: 120,
+    weightLabel: 'kg',
+    repsLabel: 'reps',
+    footer: (set, e1rm) => e1rm ? `Brzycki e1RM ${e1rm} kg` : set.reps > 0 && set.reps < 10 ? 'e1RM starts at 10 reps' : '',
+  },
+  failure: {
+    defaultRpe: 10,
+    restSeconds: 180,
+    weightLabel: 'kg',
+    repsLabel: 'reps hit',
+    showRest: true,
+    footer: () => 'Failure set: logged at max effort',
+  },
+  dropset: {
+    defaultRpe: 9,
+    restSeconds: 45,
+    weightLabel: 'drop kg',
+    repsLabel: 'drop reps',
+    showRest: true,
+    footer: () => 'Drop set: rest defaults short',
+  },
+  superset: {
+    defaultRpe: 8,
+    restSeconds: 60,
+    weightLabel: 'kg',
+    repsLabel: 'reps',
+    showRest: true,
+    footer: () => 'Superset: rest after the pairing',
+  },
+  amrap: {
+    defaultRpe: 10,
+    restSeconds: 180,
+    weightLabel: 'kg',
+    repsLabel: 'max reps',
+    showRest: true,
+    footer: (_set, e1rm) => e1rm ? `AMRAP e1RM ${e1rm} kg` : 'AMRAP uses achieved reps',
+  },
+  tempo: {
+    defaultRpe: 8,
+    restSeconds: 90,
+    weightLabel: 'kg',
+    repsLabel: 'reps',
+    showTempo: true,
+    showRest: true,
+    footer: set => `Tempo ${set.tempo ?? '3-1-1'}`,
+  },
+  assisted: {
+    defaultRpe: 8,
+    restSeconds: 90,
+    weightLabel: 'assist kg',
+    repsLabel: 'reps',
+    showRest: true,
+    footer: () => 'Assisted set: kg means assistance used',
+  },
+  partial: {
+    defaultRpe: 9,
+    restSeconds: 75,
+    weightLabel: 'kg',
+    repsLabel: 'partials',
+    showRest: true,
+    footer: () => 'Partial reps logged separately',
+  },
+};
 
 function NumberField({ label, value, step, min = 0, max, onChange }: {
   label: string;
@@ -565,6 +679,23 @@ function NumberField({ label, value, step, min = 0, max, onChange }: {
           setText(String(clamped));
           onChange(clamped);
         }}
+        className="mt-0.5 w-full bg-transparent text-base font-black text-white outline-none"
+      />
+    </label>
+  );
+}
+
+function TextField({ label, value, onChange }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="rounded-xl bg-iron-800 px-2 py-2">
+      <span className="block text-[9px] font-bold uppercase tracking-wider text-iron-600">{label}</span>
+      <input
+        value={value}
+        onChange={event => onChange(event.target.value)}
         className="mt-0.5 w-full bg-transparent text-base font-black text-white outline-none"
       />
     </label>

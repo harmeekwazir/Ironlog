@@ -6,6 +6,18 @@ import { playSetComplete } from '../utils/sound';
 import { hapticSetComplete } from '../utils/haptics';
 import { db } from '../db';
 
+const SET_TYPE_REST_SECONDS: Record<WorkoutSet['type'], number> = {
+  warmup: 60,
+  working: 120,
+  failure: 180,
+  dropset: 45,
+  superset: 60,
+  amrap: 180,
+  tempo: 90,
+  assisted: 90,
+  partial: 75,
+};
+
 interface ActiveWorkoutState {
   workout: Workout | null;
   restTimer: {
@@ -117,6 +129,9 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
           type,
           weight: lastSet?.weight ?? 0,
           reps: lastSet?.reps ?? 0,
+          rpe: type === 'failure' || type === 'amrap' ? 10 : lastSet?.rpe,
+          restSeconds: SET_TYPE_REST_SECONDS[type],
+          tempo: type === 'tempo' ? (lastSet?.tempo ?? '3-1-1') : undefined,
           completed: false,
         };
         exercise.sets = [...exercise.sets, newSet];
@@ -156,7 +171,7 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
           completedAt: !s.completed ? Date.now() : undefined,
         });
         if (!s.completed) {
-          const restSeconds = exercise.restSeconds ?? 120;
+          const restSeconds = s.restSeconds ?? exercise.restSeconds ?? SET_TYPE_REST_SECONDS[s.type];
           startRestTimer(restSeconds, exercise.exerciseId);
           playSetComplete();
           hapticSetComplete();
