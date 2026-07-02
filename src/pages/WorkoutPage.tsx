@@ -540,16 +540,31 @@ function NumberField({ label, value, step, min = 0, max, onChange }: {
   max?: number;
   onChange: (value: number) => void;
 }) {
+  const [text, setText] = useState(String(value));
+
+  useEffect(() => {
+    setText(String(value));
+  }, [value]);
+
   return (
     <label className="rounded-xl bg-iron-800 px-2 py-2">
       <span className="block text-[9px] font-bold uppercase tracking-wider text-iron-600">{label}</span>
       <input
         type="number"
-        value={value || ''}
+        value={text}
         step={step}
         min={min}
         max={max}
-        onChange={event => onChange(Math.max(min, Math.min(max ?? Infinity, Number(event.target.value) || 0)))}
+        onChange={event => {
+          const raw = event.target.value;
+          setText(raw);
+          if (raw !== '' && !Number.isNaN(Number(raw))) onChange(Number(raw));
+        }}
+        onBlur={() => {
+          const clamped = Math.max(min, Math.min(max ?? Infinity, Number(text) || min));
+          setText(String(clamped));
+          onChange(clamped);
+        }}
         className="mt-0.5 w-full bg-transparent text-base font-black text-white outline-none"
       />
     </label>

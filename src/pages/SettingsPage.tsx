@@ -165,9 +165,9 @@ export function SettingsPage() {
               role="switch"
               aria-checked={soundEnabled}
               aria-label="Toggle sound effects"
-              className={`relative h-7 w-12 flex-shrink-0 rounded-full transition-colors ${soundEnabled ? 'bg-volt-400' : 'bg-iron-700'}`}
+              className={`relative h-6 w-11 flex-shrink-0 overflow-hidden rounded-full transition-colors ${soundEnabled ? 'bg-volt-400' : 'bg-iron-700'}`}
             >
-              <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition-transform ${soundEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${soundEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
             </button>
           </div>
           <div className="bg-iron-900 rounded-2xl border border-iron-800 p-4 flex items-center gap-3 mt-2">
@@ -183,9 +183,9 @@ export function SettingsPage() {
               role="switch"
               aria-checked={hapticsEnabled}
               aria-label="Toggle haptic feedback"
-              className={`relative h-7 w-12 flex-shrink-0 rounded-full transition-colors ${hapticsEnabled ? 'bg-volt-400' : 'bg-iron-700'}`}
+              className={`relative h-6 w-11 flex-shrink-0 overflow-hidden rounded-full transition-colors ${hapticsEnabled ? 'bg-volt-400' : 'bg-iron-700'}`}
             >
-              <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition-transform ${hapticsEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${hapticsEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
             </button>
           </div>
         </div>

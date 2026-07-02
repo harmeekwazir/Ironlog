@@ -159,6 +159,16 @@ IronLog is a Progressive Web App — install it on your phone for a native app e
 
 Once installed, IronLog works fully offline.
 
+> **Note:** Android only shows the full "Install App" flow (standalone window, no address
+> bar) when the page is served over **HTTPS** with a working manifest + service worker. If
+> the site is HTTP (e.g. a plain `nginx` deployment without TLS, or your machine's LAN IP
+> during local dev), Chrome silently falls back to a plain browser bookmark instead —
+> same icon, but it opens inside Chrome. Any host in the [Deployment](#deployment) section
+> above (Netlify, Vercel, GitHub Pages) gives you HTTPS for free. To test installability
+> from your phone during local development, run `npm run dev:https` and open the printed
+> `https://<your-lan-ip>:5173` URL in Chrome on your phone (accept the one-time self-signed
+> certificate warning).
+
 ---
 
 ## Project Structure
