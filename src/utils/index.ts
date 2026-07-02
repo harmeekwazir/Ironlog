@@ -1,4 +1,4 @@
-import type { Exercise, IndividualMuscle, OverloadSuggestion, ReadinessCheck, WorkoutSet, WorkoutExercise, Workout } from '../types';
+import type { Exercise, IndividualMuscle, MuscleGroup, OverloadSuggestion, PersonalRecord, ReadinessCheck, WeeklyReport, WorkoutSet, WorkoutExercise, Workout } from '../types';
 
 export const INDIVIDUAL_MUSCLES: IndividualMuscle[] = [
   'chest', 'front_delts', 'side_delts', 'rear_delts', 'lats',
@@ -448,4 +448,48 @@ export function getOverloadSuggestions(
   }
 
   return results.sort((a, b) => b.lastTrainedAt - a.lastTrainedAt).slice(0, limit);
+}
+
+export function getWeeklyReport(
+  workouts: Workout[],
+  exercises: Record<string, Exercise>,
+  personalRecords: PersonalRecord[],
+  now = Date.now(),
+): WeeklyReport {
+  const weekStart = startOfWeek(new Date(now));
+  const prevWeekStart = weekStart - 7 * 24 * 60 * 60 * 1000;
+
+  const thisWeek = workouts.filter(w => w.completedAt && w.completedAt >= weekStart);
+  const lastWeek = workouts.filter(w => w.completedAt && w.completedAt >= prevWeekStart && w.completedAt < weekStart);
+
+  const volume = thisWeek.reduce((sum, w) => sum + (w.totalVolume ?? calcWorkoutVolume(w)), 0);
+  const prevVolume = lastWeek.reduce((sum, w) => sum + (w.totalVolume ?? calcWorkoutVolume(w)), 0);
+  const prsThisWeek = personalRecords.filter(pr => pr.achievedAt >= weekStart).length;
+
+  const volumeByExercise: Record<string, number> = {};
+  const muscleGroupsHit = new Set<MuscleGroup>();
+  for (const workout of thisWeek) {
+    for (const ex of workout.exercises) {
+      volumeByExercise[ex.exerciseId] = (volumeByExercise[ex.exerciseId] ?? 0) + calcExerciseVolume(ex);
+      exercises[ex.exerciseId]?.muscleGroups.forEach(g => muscleGroupsHit.add(g));
+    }
+  }
+
+  let topExercise: WeeklyReport['topExercise'] = null;
+  for (const [exerciseId, vol] of Object.entries(volumeByExercise)) {
+    if (vol > 0 && (!topExercise || vol > topExercise.volume)) {
+      topExercise = { name: exercises[exerciseId]?.name ?? 'Unknown', volume: vol };
+    }
+  }
+
+  return {
+    weekStart,
+    sessions: thisWeek.length,
+    prevSessions: lastWeek.length,
+    volume,
+    prevVolume,
+    prsThisWeek,
+    topExercise,
+    muscleGroupsHit: muscleGroupsHit.size,
+  };
 }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import {
   BatteryCharging, Check, ChevronDown, ChevronUp, CopyPlus, Gauge,
-  Pencil, Play, Plus, Save, Sparkles, Trash2, X,
+  Pencil, Play, Plus, Save, Sparkles, Trash2, Trophy, X,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { useActiveWorkout } from '../store/activeWorkout';
@@ -13,6 +14,8 @@ import {
   calculateReadiness, estimate1RM, formatDuration, generateId,
   getReadinessLabel, getSetTypeBadgeColor, getSetTypeLabel,
 } from '../utils';
+import { playPR, playWorkoutComplete } from '../utils/sound';
+import { hapticPR, hapticWorkoutComplete } from '../utils/haptics';
 
 const SET_TYPES: SetType[] = ['warmup', 'working', 'failure', 'dropset', 'amrap', 'tempo', 'assisted', 'partial'];
 const DEFAULT_REST: Record<string, number> = { warmup: 60, working: 120, failure: 180, dropset: 60, amrap: 180, tempo: 90, assisted: 90, partial: 60 };
@@ -49,7 +52,13 @@ export function WorkoutPage() {
   const [sessionRpe, setSessionRpe] = useState(7);
   const [pendingTemplate, setPendingTemplate] = useState<WorkoutTemplate | null | undefined>(undefined);
   const [summary, setSummary] = useState<Workout | null>(null);
+  const [prCount, setPrCount] = useState(0);
   const nameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!summary) return;
+    if (prCount > 0) { playPR(); hapticPR(); } else { playWorkoutComplete(); hapticWorkoutComplete(); }
+  }, [summary, prCount]);
 
   const loadData = async () => {
     const [allExercises, allTemplates] = await Promise.all([
@@ -174,15 +183,31 @@ export function WorkoutPage() {
   if (summary) {
     const duration = summary.completedAt! - summary.startedAt;
     const sets = summary.exercises.reduce((sum, exercise) => sum + exercise.sets.filter(set => set.completed).length, 0);
+    const isPR = prCount > 0;
     return (
       <div className="min-h-screen px-4 pt-12 pb-28">
-        <div className="rounded-[32px] border border-volt-400/20 bg-gradient-to-b from-volt-400/15 to-iron-900 p-6 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-volt-400 flex items-center justify-center mx-auto">
+        <div className={`relative overflow-hidden rounded-[32px] border p-6 text-center ${
+          isPR ? 'border-amber-400/25 bg-gradient-to-b from-amber-400/15 to-iron-900' : 'border-volt-400/20 bg-gradient-to-b from-volt-400/15 to-iron-900'
+        }`}>
+          <ConfettiBurst celebratory={isPR} />
+          <motion.div
+            initial={{ scale: 0, rotate: -20 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 15 }}
+            className={`relative z-10 mx-auto flex h-16 w-16 items-center justify-center rounded-2xl ${isPR ? 'bg-amber-400' : 'bg-volt-400'}`}
+          >
             <Check size={32} className="text-iron-950" strokeWidth={3} />
-          </div>
-          <p className="text-volt-300 text-xs font-bold uppercase tracking-[0.2em] mt-5">Session banked</p>
-          <h1 className="text-3xl font-black text-white mt-2">{summary.name}</h1>
-          <p className="text-iron-400 text-sm mt-2">Load {summary.workload} AU · RPE {summary.sessionRpe}</p>
+          </motion.div>
+          <p className={`relative z-10 mt-5 text-xs font-bold uppercase tracking-[0.2em] ${isPR ? 'text-amber-300' : 'text-volt-300'}`}>
+            {isPR ? 'New personal record!' : 'Session banked'}
+          </p>
+          <h1 className="relative z-10 mt-2 text-3xl font-black text-white">{summary.name}</h1>
+          <p className="relative z-10 mt-2 text-sm text-iron-400">Load {summary.workload} AU · RPE {summary.sessionRpe}</p>
+          {isPR && (
+            <div className="relative z-10 mt-4 inline-flex items-center gap-1.5 rounded-full bg-amber-400/10 px-3 py-1.5 text-xs font-black text-amber-300">
+              <Trophy size={14} /> {prCount} exercise{prCount > 1 ? 's' : ''} hit a new best
+            </div>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3 mt-4">
           {[
@@ -207,8 +232,11 @@ export function WorkoutPage() {
   if (!workout) return null;
 
   const handleFinish = async () => {
-    const completed = await finishWorkout(sessionRpe, exercises);
-    if (completed) setSummary(completed);
+    const result = await finishWorkout(sessionRpe, exercises);
+    if (result) {
+      setSummary(result.workout);
+      setPrCount(result.prCount);
+    }
   };
 
   return (
@@ -402,6 +430,46 @@ function ReadinessSheet({ onClose, onComplete }: { onClose: () => void; onComple
   );
 }
 
+interface ConfettiParticle { id: number; angle: number; distance: number; size: number; color: string; delay: number }
+
+function ConfettiBurst({ celebratory }: { celebratory: boolean }) {
+  // Lazy initializer runs once on mount — the blessed spot for one-time impure (random) setup.
+  const [particles] = useState<ConfettiParticle[]>(() => {
+    const colors = celebratory
+      ? ['#fbbf24', '#f59e0b', '#fde68a', '#d4f52a']
+      : ['#d4f52a', '#a3e635', '#e8ff5a'];
+    return Array.from({ length: 24 }, (_, i) => ({
+      id: i,
+      angle: (Math.PI * 2 * i) / 24 + Math.random() * 0.3,
+      distance: 80 + Math.random() * 90,
+      size: 5 + Math.random() * 5,
+      color: colors[i % colors.length],
+      delay: Math.random() * 0.12,
+    }));
+  });
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
+      {particles.map(p => (
+        <motion.span
+          key={p.id}
+          initial={{ x: 0, y: 0, opacity: 1, scale: 1 }}
+          animate={{
+            x: Math.cos(p.angle) * p.distance,
+            y: Math.sin(p.angle) * p.distance - 20,
+            opacity: 0,
+            scale: 0.4,
+            rotate: 180,
+          }}
+          transition={{ duration: 0.9, delay: p.delay, ease: 'easeOut' }}
+          className="absolute rounded-sm"
+          style={{ width: p.size, height: p.size, backgroundColor: p.color }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function BottomSheet({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/70 backdrop-blur-sm">
@@ -443,9 +511,14 @@ function SetRow({ set, setIndex, onUpdate, onComplete }: {
         </div>
         <span className="flex-1 text-xs font-bold text-iron-500">Set {setIndex + 1}</span>
         <span className="text-[10px] text-iron-600">stress {stress}</span>
-        <button onClick={onComplete} className={`w-8 h-8 rounded-xl flex items-center justify-center ${set.completed ? 'bg-volt-400 text-iron-950' : 'bg-iron-800 text-iron-400'}`}>
+        <motion.button
+          onClick={onComplete}
+          animate={set.completed ? { scale: [1, 1.3, 1] } : { scale: 1 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+          className={`w-8 h-8 rounded-xl flex items-center justify-center ${set.completed ? 'bg-volt-400 text-iron-950' : 'bg-iron-800 text-iron-400'}`}
+        >
           <Check size={14} strokeWidth={3} />
-        </button>
+        </motion.button>
       </div>
       <div className="grid grid-cols-3 gap-2 mt-3">
         <NumberField label="kg" value={set.weight} step={2.5} onChange={weight => onUpdate({ weight })} />

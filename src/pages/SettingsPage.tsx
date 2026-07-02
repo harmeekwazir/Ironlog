@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { Download, Upload, Trash2, Database, Info, ChevronRight, Shield, Smartphone, User, Settings2 } from 'lucide-react';
+import { Download, Upload, Trash2, Database, Info, ChevronRight, Shield, Smartphone, User, Settings2, Volume2, VolumeX, Vibrate } from 'lucide-react';
 import { db } from '../db';
 import { useNav } from '../store/nav';
 import { useProfile } from '../store/profile';
+import { useSettings } from '../store/settings';
 
 export function SettingsPage() {
   const [confirm, setConfirm] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const { setPage } = useNav();
   const profile = useProfile();
+  const { soundEnabled, setSoundEnabled, hapticsEnabled, setHapticsEnabled } = useSettings();
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000); };
 
@@ -145,6 +147,47 @@ export function SettingsPage() {
               <Settings2 size={16} className="text-iron-500" />
             </div>
           </button>
+        </div>
+
+        {/* Preferences */}
+        <div>
+          <p className="text-iron-500 text-xs uppercase tracking-wider font-semibold mb-2 px-1">Preferences</p>
+          <div className="bg-iron-900 rounded-2xl border border-iron-800 p-4 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-volt-400/10 flex items-center justify-center flex-shrink-0">
+              {soundEnabled ? <Volume2 size={16} className="text-volt-400" /> : <VolumeX size={16} className="text-iron-500" />}
+            </div>
+            <div className="flex-1">
+              <p className="text-white font-semibold text-sm">Sound effects</p>
+              <p className="text-iron-500 text-xs">Chimes for completed sets, finished workouts & new PRs</p>
+            </div>
+            <button
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              role="switch"
+              aria-checked={soundEnabled}
+              aria-label="Toggle sound effects"
+              className={`relative h-7 w-12 flex-shrink-0 rounded-full transition-colors ${soundEnabled ? 'bg-volt-400' : 'bg-iron-700'}`}
+            >
+              <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition-transform ${soundEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+          <div className="bg-iron-900 rounded-2xl border border-iron-800 p-4 flex items-center gap-3 mt-2">
+            <div className="w-9 h-9 rounded-lg bg-volt-400/10 flex items-center justify-center flex-shrink-0">
+              <Vibrate size={16} className={hapticsEnabled ? 'text-volt-400' : 'text-iron-500'} />
+            </div>
+            <div className="flex-1">
+              <p className="text-white font-semibold text-sm">Haptic feedback</p>
+              <p className="text-iron-500 text-xs">Vibration on completed sets, finished workouts & new PRs</p>
+            </div>
+            <button
+              onClick={() => setHapticsEnabled(!hapticsEnabled)}
+              role="switch"
+              aria-checked={hapticsEnabled}
+              aria-label="Toggle haptic feedback"
+              className={`relative h-7 w-12 flex-shrink-0 rounded-full transition-colors ${hapticsEnabled ? 'bg-volt-400' : 'bg-iron-700'}`}
+            >
+              <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition-transform ${hapticsEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
         </div>
 
         {/* Privacy */}

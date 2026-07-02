@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, AlertTriangle, ArrowRight, BatteryCharging, CalendarDays, ChevronRight,
-  Dumbbell, Flame, Gauge, Settings2, ShieldCheck, TrendingUp, User, Zap,
+  Dumbbell, FileText, Flame, Gauge, Settings2, ShieldCheck, TrendingUp, User, Zap,
 } from 'lucide-react';
 import { eachDayOfInterval, format, isToday, startOfDay, subDays } from 'date-fns';
 import { db } from '../db';
 import { useActiveWorkout } from '../store/activeWorkout';
 import { useNav } from '../store/nav';
-import type { Exercise, OverloadSuggestion, ReadinessCheck, Workout } from '../types';
+import type { Exercise, OverloadSuggestion, PersonalRecord, ReadinessCheck, WeeklyReport, Workout } from '../types';
 import {
   calcWorkoutVolume, formatDuration, getAcwr, getMuscleRecovery,
-  getOverloadSuggestions, getReadinessLabel, MUSCLE_LABELS,
+  getOverloadSuggestions, getReadinessLabel, getWeeklyReport, MUSCLE_LABELS,
 } from '../utils';
 import frontSvgRaw from '../assets/front.svg?raw';
 import backSvgRaw from '../assets/Back.svg?raw';
@@ -29,7 +29,7 @@ export function Dashboard() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [exercises, setExercises] = useState<Record<string, Exercise>>({});
   const [readiness, setReadiness] = useState<ReadinessCheck | null>(null);
-  const [prCount, setPrCount] = useState(0);
+  const [personalRecords, setPersonalRecords] = useState<PersonalRecord[]>([]);
   const [suggestions, setSuggestions] = useState<OverloadSuggestion[]>([]);
 
   useEffect(() => {
@@ -38,13 +38,13 @@ export function Dashboard() {
       const [allWorkouts, todayReadiness, prs, exAll] = await Promise.all([
         db.workouts.filter(item => !!item.completedAt).toArray(),
         db.readiness.where('date').equals(date).last(),
-        db.personalRecords.count(),
+        db.personalRecords.toArray(),
         db.exercises.toArray(),
       ]);
       const sorted = allWorkouts.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
       setWorkouts(sorted);
       setReadiness(todayReadiness ?? null);
-      setPrCount(prs);
+      setPersonalRecords(prs);
       const exMap: Record<string, Exercise> = {};
       exAll.forEach(e => { exMap[e.id] = e; });
       setExercises(exMap);
@@ -53,7 +53,12 @@ export function Dashboard() {
     void load();
   }, []);
 
+  const prCount = personalRecords.length;
   const acwr = useMemo(() => getAcwr(workouts), [workouts]);
+  const weeklyReport = useMemo(
+    () => getWeeklyReport(workouts, exercises, personalRecords),
+    [workouts, exercises, personalRecords],
+  );
   const muscleRecovery = useMemo(
     () => getMuscleRecovery(workouts, exercises).sort((a, b) => a.recovery - b.recovery),
     [workouts, exercises],
@@ -162,6 +167,10 @@ export function Dashboard() {
           </div>
         )}
 
+        {(weeklyReport.sessions > 0 || weeklyReport.prevSessions > 0) && (
+          <WeeklyReportCard report={weeklyReport} />
+        )}
+
         <section className="rounded-[28px] border border-iron-800 bg-iron-900 p-4">
           <div className="flex items-start justify-between">
             <div>
@@ -237,6 +246,54 @@ export function Dashboard() {
           )}
         </section>
       </main>
+    </div>
+  );
+}
+
+function WeeklyReportCard({ report }: { report: WeeklyReport }) {
+  const volumeDelta = report.prevVolume > 0
+    ? Math.round(((report.volume - report.prevVolume) / report.prevVolume) * 100)
+    : null;
+  const sessionsDelta = report.sessions - report.prevSessions;
+
+  return (
+    <section className="rounded-[28px] border border-iron-800 bg-iron-900 p-4">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="font-black text-white">Weekly report</p>
+          <p className="mt-0.5 text-xs text-iron-500">{format(report.weekStart, 'MMM d')} – today · vs. last week</p>
+        </div>
+        <FileText size={18} className="text-volt-400 flex-shrink-0" />
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <ReportStat label="Sessions" value={`${report.sessions}`} delta={sessionsDelta} />
+        <ReportStat label="Volume" value={`${(report.volume / 1000).toFixed(1)}t`} delta={volumeDelta} suffix="%" />
+        <ReportStat label="PRs" value={`${report.prsThisWeek}`} />
+      </div>
+
+      {report.topExercise && (
+        <div className="mt-3 flex items-center gap-1.5 rounded-xl bg-iron-950 px-3 py-2">
+          <TrendingUp size={12} className="flex-shrink-0 text-volt-400" />
+          <p className="text-[11px] font-bold text-iron-300">
+            Top lift: {report.topExercise.name} · {(report.topExercise.volume / 1000).toFixed(1)}t · {report.muscleGroupsHit} muscle groups trained
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ReportStat({ label, value, delta, suffix = '' }: { label: string; value: string; delta?: number | null; suffix?: string }) {
+  return (
+    <div className="rounded-2xl border border-iron-800 bg-iron-950/60 p-3">
+      <p className="text-lg font-black text-white">{value}</p>
+      <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-iron-600">{label}</p>
+      {!!delta && (
+        <p className={`mt-1 text-[10px] font-bold ${delta > 0 ? 'text-volt-400' : 'text-red-400'}`}>
+          {delta > 0 ? '+' : ''}{delta}{suffix} vs last wk
+        </p>
+      )}
     </div>
   );
 }

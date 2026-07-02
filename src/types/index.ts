@@ -157,3 +157,14 @@ export interface OverloadSuggestion {
   sessionCount: number;
   lastTrainedAt: number;
 }
+
+export interface WeeklyReport {
+  weekStart: number;
+  sessions: number;
+  prevSessions: number;
+  volume: number;
+  prevVolume: number;
+  prsThisWeek: number;
+  topExercise: { name: string; volume: number } | null;
+  muscleGroupsHit: number;
+}

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Exercise, ReadinessCheck, Workout, WorkoutExercise, WorkoutSet, WorkoutTemplate } from '../types';
 import { generateId, calcWorkoutVolume, calcMuscleStress, calcSessionWorkload, estimate1RM } from '../utils';
+import { playSetComplete } from '../utils/sound';
+import { hapticSetComplete } from '../utils/haptics';
 import { db } from '../db';
 
 interface ActiveWorkoutState {
@@ -25,7 +27,7 @@ interface ActiveWorkoutState {
   setExerciseNotes: (exerciseIndex: number, notes: string) => void;
   startRestTimer: (seconds: number, exerciseId?: string) => void;
   stopRestTimer: () => void;
-  finishWorkout: (sessionRpe: number, exercises: Record<string, Exercise>) => Promise<Workout | null>;
+  finishWorkout: (sessionRpe: number, exercises: Record<string, Exercise>) => Promise<{ workout: Workout; prCount: number } | null>;
   discardWorkout: () => void;
   updateWorkoutName: (name: string) => void;
 }
@@ -156,6 +158,8 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
         if (!s.completed) {
           const restSeconds = exercise.restSeconds ?? 120;
           startRestTimer(restSeconds, exercise.exerciseId);
+          playSetComplete();
+          hapticSetComplete();
         }
       },
 
@@ -189,6 +193,7 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
         await db.workouts.put(completedWorkout);
 
         // Check and save PRs
+        const prExerciseIds = new Set<string>();
         for (const exercise of completedWorkout.exercises) {
           const workingSets = exercise.sets.filter(s => s.completed && s.type !== 'warmup');
           if (workingSets.length === 0) continue;
@@ -212,6 +217,7 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
               workoutId: completedWorkout.id,
               achievedAt: completedWorkout.completedAt!,
             });
+            prExerciseIds.add(exercise.exerciseId);
           }
 
           // Check estimated 1RM PR
@@ -229,11 +235,12 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
               workoutId: completedWorkout.id,
               achievedAt: completedWorkout.completedAt!,
             });
+            prExerciseIds.add(exercise.exerciseId);
           }
         }
 
         set({ workout: null, restTimer: null });
-        return completedWorkout;
+        return { workout: completedWorkout, prCount: prExerciseIds.size };
       },
 
       discardWorkout: () => {
