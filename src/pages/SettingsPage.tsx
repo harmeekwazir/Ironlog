@@ -1,9 +1,19 @@
 import { useState } from 'react';
-import { Download, Upload, Trash2, Database, Info, ChevronRight, Shield, Smartphone, User, Settings2, Volume2, VolumeX, Vibrate, BookOpen } from 'lucide-react';
+import { Download, Upload, Trash2, Database, Info, ChevronRight, Shield, Smartphone, User, Settings2, Volume2, VolumeX, Vibrate, BookOpen, Cloud, LogOut, RefreshCw } from 'lucide-react';
 import { db } from '../db';
 import { useNav } from '../store/nav';
 import { useProfile } from '../store/profile';
 import { useSettings } from '../store/settings';
+import { useAuth } from '../store/auth';
+import { useSyncStatus } from '../store/sync';
+import { syncNow } from '../sync/engine';
+
+const SYNC_STATUS_LABEL: Record<string, string> = {
+  idle: 'Synced',
+  syncing: 'Syncing…',
+  error: 'Sync error',
+  offline: 'Offline — will sync when back online',
+};
 
 export function SettingsPage() {
   const [confirm, setConfirm] = useState<string | null>(null);
@@ -11,6 +21,8 @@ export function SettingsPage() {
   const { setPage } = useNav();
   const profile = useProfile();
   const { soundEnabled, setSoundEnabled, hapticsEnabled, setHapticsEnabled } = useSettings();
+  const { status, user, signOut } = useAuth();
+  const sync = useSyncStatus();
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000); };
 
@@ -99,6 +111,47 @@ export function SettingsPage() {
       )}
 
       <div className="px-4 pt-4 space-y-4">
+        {/* Account / cloud sync section */}
+        <div>
+          <p className="text-iron-500 text-xs uppercase tracking-wider font-semibold mb-2 px-1">Account</p>
+          {status === 'signed-in' ? (
+            <div className="bg-iron-900 rounded-2xl border border-iron-800 p-4 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-volt-400/10 flex items-center justify-center flex-shrink-0"><Cloud size={16} className="text-volt-400" /></div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-semibold text-sm truncate">{user?.email}</p>
+                  <p className={`text-xs ${sync.status === 'error' ? 'text-red-400' : 'text-iron-500'}`}>
+                    {SYNC_STATUS_LABEL[sync.status]}
+                    {sync.status === 'idle' && sync.lastSyncedAt ? ` · ${new Date(sync.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => { await signOut(); flash('Signed out'); }}
+                  className="flex items-center gap-1.5 text-red-400 text-xs font-semibold px-3 py-2 rounded-xl hover:bg-red-500/10 transition-colors"
+                >
+                  <LogOut size={13} /> Sign out
+                </button>
+              </div>
+              <button
+                onClick={() => syncNow()}
+                disabled={sync.status === 'syncing'}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-iron-950 border border-iron-800 text-iron-300 text-xs font-semibold disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={sync.status === 'syncing' ? 'animate-spin' : ''} /> Sync now
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setPage('auth')} className="w-full bg-iron-900 rounded-2xl border border-iron-800 p-4 flex items-center gap-3 hover:border-volt-400/30 transition-colors text-left">
+              <div className="w-9 h-9 rounded-lg bg-volt-400/10 flex items-center justify-center flex-shrink-0"><Cloud size={16} className="text-volt-400" /></div>
+              <div className="flex-1">
+                <p className="text-white font-semibold text-sm">Sign in to sync</p>
+                <p className="text-iron-500 text-xs">Back up your data and sync it across devices</p>
+              </div>
+              <ChevronRight size={14} className="text-iron-600" />
+            </button>
+          )}
+        </div>
+
         {/* Data section */}
         <div>
           <p className="text-iron-500 text-xs uppercase tracking-wider font-semibold mb-2 px-1">Data & Backup</p>
@@ -207,8 +260,8 @@ export function SettingsPage() {
           <p className="text-iron-500 text-xs uppercase tracking-wider font-semibold mb-2 px-1">Privacy</p>
           <div className="bg-iron-900 rounded-2xl border border-iron-800 p-4 space-y-3">
             {[
-              { icon: Shield, label: 'No account required', desc: 'IronLog works 100% offline', color: 'text-volt-400', bg: 'bg-volt-400/10' },
-              { icon: Database, label: 'Stored on your device', desc: 'IndexedDB — your data stays local', color: 'text-blue-400', bg: 'bg-blue-400/10' },
+              { icon: Shield, label: 'Account optional', desc: 'IronLog works 100% offline, with or without sign-in', color: 'text-volt-400', bg: 'bg-volt-400/10' },
+              { icon: Database, label: 'Stored on your device', desc: 'IndexedDB first — cloud sync only if you sign in', color: 'text-blue-400', bg: 'bg-blue-400/10' },
               { icon: Smartphone, label: 'Install as PWA', desc: 'Add to home screen for app experience', color: 'text-purple-400', bg: 'bg-purple-400/10' },
             ].map(s => (
               <div key={s.label} className="flex items-center gap-3">

@@ -1,12 +1,30 @@
 import Dexie, { type Table } from 'dexie';
 import type { Workout, Exercise, PersonalRecord, WorkoutTemplate, ReadinessCheck } from '../types';
 
+// A syncable table name — kept in sync with the Dexie tables mirrored to Supabase.
+export type SyncTableName = 'workouts' | 'exercises' | 'personalRecords' | 'templates' | 'readiness';
+
+export interface SyncQueueEntry {
+  localId?: number;
+  table: SyncTableName;
+  recordId: string;
+  op: 'upsert' | 'delete';
+  updatedAt: number;
+}
+
+export interface SyncMetaEntry {
+  table: SyncTableName;
+  lastPulledAt: number;
+}
+
 class IronLogDB extends Dexie {
   workouts!: Table<Workout>;
   exercises!: Table<Exercise>;
   personalRecords!: Table<PersonalRecord>;
   templates!: Table<WorkoutTemplate>;
   readiness!: Table<ReadinessCheck>;
+  syncQueue!: Table<SyncQueueEntry>;
+  syncMeta!: Table<SyncMetaEntry>;
 
   constructor() {
     super('IronLogDB');
@@ -22,6 +40,24 @@ class IronLogDB extends Dexie {
       personalRecords: 'id, exerciseId, type, achievedAt',
       templates: 'id, name, createdAt, lastUsed',
       readiness: 'id, date, createdAt',
+    });
+    // Adds `updatedAt` indexes (needed to watermark cloud sync) plus the outbox
+    // (syncQueue) and per-table pull cursor (syncMeta) tables used by the sync engine.
+    this.version(3).stores({
+      workouts: 'id, startedAt, completedAt, isTemplate, updatedAt',
+      exercises: 'id, name, category, isCustom, updatedAt',
+      personalRecords: 'id, exerciseId, type, achievedAt, updatedAt',
+      templates: 'id, name, createdAt, lastUsed, updatedAt',
+      readiness: 'id, date, createdAt, updatedAt',
+      syncQueue: '++localId, table, recordId, updatedAt',
+      syncMeta: 'table',
+    }).upgrade(async (tx) => {
+      const now = Date.now();
+      await tx.table('workouts').toCollection().modify((w) => { w.updatedAt ??= w.completedAt ?? w.startedAt ?? now; });
+      await tx.table('exercises').toCollection().modify((e) => { e.updatedAt ??= e.createdAt ?? now; });
+      await tx.table('personalRecords').toCollection().modify((p) => { p.updatedAt ??= p.achievedAt ?? now; });
+      await tx.table('templates').toCollection().modify((t) => { t.updatedAt ??= t.lastUsed ?? t.createdAt ?? now; });
+      await tx.table('readiness').toCollection().modify((r) => { r.updatedAt ??= r.createdAt ?? now; });
     });
   }
 }
@@ -106,7 +142,7 @@ export async function seedExercises() {
   await db.exercises.filter(e => !e.isCustom).delete();
 
   const now = Date.now();
-  const defaults: Exercise[] = [
+  const defaults: Omit<Exercise, 'updatedAt'>[] = [
     // ── Chest (ex-001 → ex-011) ────────────────────────────────────────────
     { id: 'ex-001', name: 'Barbell Bench Press',       muscleGroups: ['chest', 'shoulders', 'arms'], equipment: ['barbell'],    category: 'chest',    isCustom: false, createdAt: now },
     { id: 'ex-002', name: 'Incline Dumbbell Press',    muscleGroups: ['chest', 'shoulders'],          equipment: ['dumbbell'],   category: 'chest',    isCustom: false, createdAt: now },
@@ -206,5 +242,5 @@ export async function seedExercises() {
     { id: 'ex-080', name: 'Clean and Press',           muscleGroups: ['legs', 'shoulders', 'back'],   equipment: ['barbell'],    category: 'full-body', isCustom: false, createdAt: now },
   ];
 
-  await db.exercises.bulkPut(defaults);
+  await db.exercises.bulkPut(defaults.map(e => ({ ...e, updatedAt: now })));
 }

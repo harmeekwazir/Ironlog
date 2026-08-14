@@ -59,6 +59,7 @@ export function ExercisePicker({ onSelect, onClose }: Props) {
       category: newCategory,
       isCustom: true,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
     await db.exercises.add(ex);
     setExercises(prev => [...prev, ex]);

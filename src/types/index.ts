@@ -89,6 +89,8 @@ export interface Workout {
   sessionRpe?: number;
   workload?: number;
   muscleStress?: Partial<Record<IndividualMuscle, number>>;
+  updatedAt: number;
+  deletedAt?: number;
 }
 
 export interface Exercise {
@@ -100,6 +102,8 @@ export interface Exercise {
   notes?: string;
   isCustom?: boolean;
   createdAt: number;
+  updatedAt: number;
+  deletedAt?: number;
 }
 
 export interface PersonalRecord {
@@ -111,6 +115,8 @@ export interface PersonalRecord {
   weight?: number;
   workoutId: string;
   achievedAt: number;
+  updatedAt: number;
+  deletedAt?: number;
 }
 
 export interface WorkoutTemplate {
@@ -126,6 +132,8 @@ export interface WorkoutTemplate {
   createdAt: number;
   lastUsed?: number;
   sourceWorkoutId?: string;
+  updatedAt: number;
+  deletedAt?: number;
 }
 
 export interface ReadinessCheck {
@@ -139,6 +147,8 @@ export interface ReadinessCheck {
   score: number;
   recoveryMultiplier: number;
   createdAt: number;
+  updatedAt: number;
+  deletedAt?: number;
 }
 
 export type ActiveSet = WorkoutSet & {

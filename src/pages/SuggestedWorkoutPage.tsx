@@ -37,6 +37,7 @@ export function SuggestedWorkoutPage() {
       id: generateId(),
       name: `${suggestion.label} Day`,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
       exercises: suggestion.exercises.map(e => ({
         exerciseId: e.exerciseId,
         sets: e.sets,

@@ -49,6 +49,7 @@ export function HistoryPage() {
       sourceWorkoutId: workout.id,
       createdAt: existing?.createdAt ?? Date.now(),
       lastUsed: existing?.lastUsed,
+      updatedAt: Date.now(),
       exercises: workout.exercises.map(item => {
         const completedSets = item.sets.filter(set => set.completed);
         const referenceSets = completedSets.length > 0 ? completedSets : item.sets;

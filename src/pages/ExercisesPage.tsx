@@ -59,6 +59,7 @@ export function ExercisesPage() {
       notes: form.notes || undefined,
       isCustom: true,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
     await db.exercises.add(ex);
     setForm({ name: '', category: 'chest', equipment: ['barbell'], notes: '' });

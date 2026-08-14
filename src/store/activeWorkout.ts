@@ -55,6 +55,7 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
           id: generateId(),
           name: template?.name ?? name,
           startedAt: Date.now(),
+          updatedAt: Date.now(),
           readinessId: readiness?.id,
           readinessScore: readiness?.score,
           recoveryMultiplier: readiness?.recoveryMultiplier,
@@ -200,6 +201,7 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
         const completedWorkout: Workout = {
           ...workout,
           completedAt: Date.now(),
+          updatedAt: Date.now(),
           totalVolume: calcWorkoutVolume(workout),
           sessionRpe,
           workload: calcSessionWorkload(sessionRpe, Date.now() - workout.startedAt),
@@ -231,6 +233,7 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
               weight: bestSet.weight,
               workoutId: completedWorkout.id,
               achievedAt: completedWorkout.completedAt!,
+              updatedAt: completedWorkout.completedAt!,
             });
             prExerciseIds.add(exercise.exerciseId);
           }
@@ -249,6 +252,7 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
               value: Math.round(best1rm),
               workoutId: completedWorkout.id,
               achievedAt: completedWorkout.completedAt!,
+              updatedAt: completedWorkout.completedAt!,
             });
             prExerciseIds.add(exercise.exerciseId);
           }

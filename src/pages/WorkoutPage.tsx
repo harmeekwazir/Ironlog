@@ -82,6 +82,7 @@ export function WorkoutPage() {
       name: templateName.trim() || workout.name,
       sourceWorkoutId: workout.id,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
       exercises: workout.exercises.map(item => ({
         exerciseId: item.exerciseId,
         sets: Math.max(1, item.sets.length),

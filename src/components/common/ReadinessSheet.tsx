@@ -19,6 +19,7 @@ export function ReadinessSheet({ onClose, onComplete }: { onClose: () => void; o
       ...values,
       ...result,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
     await db.readiness.put(check);
     onComplete(check);

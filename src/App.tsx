@@ -11,7 +11,13 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SuggestedWorkoutPage } from './pages/SuggestedWorkoutPage';
+import { AuthPage } from './pages/AuthPage';
 import { seedExercises } from './db';
+import { registerSyncHooks } from './sync/outbox';
+import { startSyncEngine } from './sync/engine';
+
+registerSyncHooks();
+startSyncEngine();
 
 function PageRouter() {
   const { page } = useNav();
@@ -24,6 +30,7 @@ function PageRouter() {
     case 'settings': return <SettingsPage />;
     case 'profile': return <ProfilePage />;
     case 'suggested': return <SuggestedWorkoutPage />;
+    case 'auth': return <AuthPage />;
     default: return <Dashboard />;
   }
 }
