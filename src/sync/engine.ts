@@ -137,6 +137,7 @@ async function runSync(userId: string) {
     for (const table of SYNC_TABLES) await pullTable(userId, table);
     useSyncStatus.setState({ status: 'idle', lastSyncedAt: Date.now(), error: null });
   } catch (err) {
+    console.error('[sync] runSync failed', err);
     useSyncStatus.setState({ status: 'error', error: err instanceof Error ? err.message : String(err) });
   } finally {
     syncing = false;
@@ -171,8 +172,11 @@ async function handleSignedIn(userId: string) {
   try {
     await ensureInitialSync(userId);
   } catch (err) {
+    // Don't let a failed one-time backfill permanently block ongoing sync — fall
+    // through to triggerSync()/startInterval() so the outbox can still drain and
+    // future edits keep syncing even if the historical upload needs a retry later.
+    console.error('[sync] initial sync failed', err);
     useSyncStatus.setState({ status: 'error', error: err instanceof Error ? err.message : String(err) });
-    return;
   }
   triggerSync();
   startInterval();

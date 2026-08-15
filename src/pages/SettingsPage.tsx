@@ -132,6 +132,9 @@ export function SettingsPage() {
                   <LogOut size={13} /> Sign out
                 </button>
               </div>
+              {sync.status === 'error' && sync.error && (
+                <p className="text-red-400 text-xs bg-red-500/10 border border-red-900/30 rounded-xl px-3 py-2 break-words">{sync.error}</p>
+              )}
               <button
                 onClick={() => syncNow()}
                 disabled={sync.status === 'syncing'}
