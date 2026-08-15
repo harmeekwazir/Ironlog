@@ -6,7 +6,7 @@ import { useProfile } from '../store/profile';
 import { useSettings } from '../store/settings';
 import { useAuth } from '../store/auth';
 import { useSyncStatus } from '../store/sync';
-import { syncNow } from '../sync/engine';
+import { syncNow, forceFullResync } from '../sync/engine';
 
 const SYNC_STATUS_LABEL: Record<string, string> = {
   idle: 'Synced',
@@ -141,6 +141,13 @@ export function SettingsPage() {
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-iron-950 border border-iron-800 text-iron-300 text-xs font-semibold disabled:opacity-50"
               >
                 <RefreshCw size={13} className={sync.status === 'syncing' ? 'animate-spin' : ''} /> Sync now
+              </button>
+              <button
+                onClick={() => { void forceFullResync(); flash('Full re-sync started'); }}
+                disabled={sync.status === 'syncing'}
+                className="w-full text-iron-500 text-[11px] py-1 disabled:opacity-50"
+              >
+                Not seeing the other device's data? Force full re-sync
               </button>
             </div>
           ) : (

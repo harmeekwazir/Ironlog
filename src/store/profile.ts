@@ -11,7 +11,10 @@ export interface ProfileState {
   goal: TrainingGoal;
   activityLevel: ActivityLevel;
   notes: string;
-  updateProfile: (changes: Partial<Omit<ProfileState, 'updateProfile'>>) => void;
+  // 0 means "never edited locally" — lets a pulled remote profile always win over an
+  // untouched default instead of being compared against a real last-write-wins timestamp.
+  updatedAt: number;
+  updateProfile: (changes: Partial<Omit<ProfileState, 'updateProfile' | 'resetProfile' | 'updatedAt'>>) => void;
   resetProfile: () => void;
 }
 
@@ -22,14 +25,15 @@ const defaultProfile = {
   goal: 'Build muscle' as TrainingGoal,
   activityLevel: 'moderate' as ActivityLevel,
   notes: '',
+  updatedAt: 0,
 };
 
 export const useProfile = create<ProfileState>()(
   persist(
     (set) => ({
       ...defaultProfile,
-      updateProfile: (changes) => set((state) => ({ ...state, ...changes })),
-      resetProfile: () => set({ ...defaultProfile }),
+      updateProfile: (changes) => set((state) => ({ ...state, ...changes, updatedAt: Date.now() })),
+      resetProfile: () => set({ ...defaultProfile, updatedAt: Date.now() }),
     }),
     {
       name: 'ironlog-profile',

@@ -5,6 +5,7 @@ import { useSyncStatus } from '../store/sync';
 import { withSyncSuppressed } from './outbox';
 import { SYNC_TABLES, SUPABASE_TABLE } from './tables';
 import { toRow, fromRow } from './transform';
+import { pushProfile, pullProfile } from './profile';
 
 const PUSH_BATCH_SIZE = 50;
 const PULL_PAGE_SIZE = 500;
@@ -113,6 +114,7 @@ async function pushAll(userId: string) {
       if (error) throw error;
     }
   }
+  await pushProfile(userId);
 }
 
 function initialSyncKey(userId: string) {
@@ -134,7 +136,9 @@ async function runSync(userId: string) {
   useSyncStatus.setState({ status: 'syncing', error: null });
   try {
     for (const table of SYNC_TABLES) await pushTable(userId, table);
+    await pushProfile(userId);
     for (const table of SYNC_TABLES) await pullTable(userId, table);
+    await pullProfile(userId);
     useSyncStatus.setState({ status: 'idle', lastSyncedAt: Date.now(), error: null });
   } catch (err) {
     console.error('[sync] runSync failed', err);
@@ -184,6 +188,19 @@ async function handleSignedIn(userId: string) {
 
 /** Manually kick off a sync — used by the "Sync now" button in Settings. */
 export function syncNow() {
+  triggerSync();
+}
+
+// Resets each table's pull watermark so the next sync re-fetches everything from
+// scratch, and re-runs the one-time historical push too. Doesn't touch local data —
+// re-pulling/re-pushing is idempotent (upserts by id) — it just forgets "how far we've
+// already synced", which is the fix if that watermark ever got stuck ahead of real data
+// (e.g. from a broken test run) and is now silently filtering out legitimate rows.
+export async function forceFullResync() {
+  const { status, user } = useAuth.getState();
+  if (status !== 'signed-in' || !user) return;
+  await db.syncMeta.clear();
+  localStorage.removeItem(initialSyncKey(user.id));
   triggerSync();
 }
 
