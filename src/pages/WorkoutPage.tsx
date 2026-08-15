@@ -14,6 +14,7 @@ import type { Exercise, ReadinessCheck, SetType, Workout, WorkoutSet, WorkoutTem
 import { estimate1RM, formatDuration, generateId, getSetTypeBadgeColor, getSetTypeLabel } from '../utils';
 import { playPR, playWorkoutComplete } from '../utils/sound';
 import { hapticPR, hapticWorkoutComplete } from '../utils/haptics';
+import { useSyncStatus } from '../store/sync';
 
 const SET_TYPES: SetType[] = ['warmup', 'working', 'failure', 'dropset', 'amrap', 'tempo', 'assisted', 'partial'];
 const DEFAULT_REST: Record<string, number> = { warmup: 60, working: 120, failure: 180, dropset: 60, amrap: 180, tempo: 90, assisted: 90, partial: 60 };
@@ -52,6 +53,7 @@ export function WorkoutPage() {
   const [summary, setSummary] = useState<Workout | null>(null);
   const [prCount, setPrCount] = useState(0);
   const nameRef = useRef<HTMLInputElement>(null);
+  const lastSyncedAt = useSyncStatus(s => s.lastSyncedAt);
 
   useEffect(() => {
     if (!summary) return;
@@ -67,7 +69,7 @@ export function WorkoutPage() {
     setTemplates(allTemplates);
   };
 
-  useEffect(() => { void loadData(); }, []);
+  useEffect(() => { void loadData(); }, [lastSyncedAt]);
 
   const handleReadinessComplete = (check: ReadinessCheck) => {
     startWorkout('Quick Workout', check, pendingTemplate ?? undefined);

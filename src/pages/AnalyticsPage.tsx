@@ -5,6 +5,7 @@ import { db } from '../db';
 import type { Workout, Exercise, PersonalRecord, OverloadSuggestion } from '../types';
 import { calcWorkoutVolume, getMuscleGroupColor, calcBMI, getBMICategory, getOverloadSuggestions } from '../utils';
 import { useProfile } from '../store/profile';
+import { useSyncStatus } from '../store/sync';
 import { format, subWeeks, endOfWeek, eachWeekOfInterval } from 'date-fns';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -46,6 +47,7 @@ export function AnalyticsPage() {
   const profile = useProfile();
   const bmi = useMemo(() => calcBMI(profile.weightKg, profile.heightCm), [profile.weightKg, profile.heightCm]);
   const bmiCategory = useMemo(() => getBMICategory(bmi), [bmi]);
+  const lastSyncedAt = useSyncStatus(s => s.lastSyncedAt);
 
   useEffect(() => {
     async function load() {
@@ -98,7 +100,7 @@ export function AnalyticsPage() {
       })));
     }
     load();
-  }, []);
+  }, [lastSyncedAt]);
 
   const totalVol = workouts.reduce((s, w) => s + (w.totalVolume ?? calcWorkoutVolume(w)), 0);
   const avgDuration = workouts.length > 0

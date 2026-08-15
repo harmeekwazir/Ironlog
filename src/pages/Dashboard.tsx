@@ -7,6 +7,7 @@ import { eachDayOfInterval, format, isToday, startOfDay, subDays } from 'date-fn
 import { db } from '../db';
 import { useActiveWorkout } from '../store/activeWorkout';
 import { useNav } from '../store/nav';
+import { useSyncStatus } from '../store/sync';
 import type { Exercise, MuscleSplit, OverloadSuggestion, PersonalRecord, ReadinessCheck, WeeklyReport, Workout } from '../types';
 import {
   calcWorkoutVolume, formatDuration, getAcwr, getMuscleRecovery,
@@ -31,6 +32,7 @@ export function Dashboard() {
   const [readiness, setReadiness] = useState<ReadinessCheck | null>(null);
   const [personalRecords, setPersonalRecords] = useState<PersonalRecord[]>([]);
   const [suggestions, setSuggestions] = useState<OverloadSuggestion[]>([]);
+  const lastSyncedAt = useSyncStatus(s => s.lastSyncedAt);
 
   useEffect(() => {
     const load = async () => {
@@ -51,7 +53,7 @@ export function Dashboard() {
       setSuggestions(getOverloadSuggestions(sorted, exMap, 5));
     };
     void load();
-  }, []);
+  }, [lastSyncedAt]);
 
   const prCount = personalRecords.length;
   const acwr = useMemo(() => getAcwr(workouts), [workouts]);

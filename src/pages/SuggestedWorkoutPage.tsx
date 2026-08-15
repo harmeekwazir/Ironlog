@@ -7,6 +7,7 @@ import { ReadinessSheet } from '../components/common/ReadinessSheet';
 import { SuggestedWorkoutCard } from '../components/common/SuggestedWorkoutCard';
 import type { Exercise, ReadinessCheck, Workout } from '../types';
 import { generateId, getWorkoutSuggestion } from '../utils';
+import { useSyncStatus } from '../store/sync';
 
 const DEFAULT_REST = 120;
 
@@ -17,6 +18,7 @@ export function SuggestedWorkoutPage() {
   const [pastWorkouts, setPastWorkouts] = useState<Workout[]>([]);
   const [showReadiness, setShowReadiness] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const lastSyncedAt = useSyncStatus(s => s.lastSyncedAt);
 
   useEffect(() => {
     Promise.all([db.exercises.toArray(), db.workouts.toArray()]).then(([allExercises, allWorkouts]) => {
@@ -24,7 +26,7 @@ export function SuggestedWorkoutPage() {
       setPastWorkouts(allWorkouts.filter(w => !w.isTemplate));
       setLoaded(true);
     });
-  }, []);
+  }, [lastSyncedAt]);
 
   const suggestion = useMemo(
     () => (Object.keys(exercises).length ? getWorkoutSuggestion(pastWorkouts, exercises) : null),

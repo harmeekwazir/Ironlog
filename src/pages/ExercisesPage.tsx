@@ -4,6 +4,7 @@ import { db } from '../db';
 import type { Exercise, MuscleGroup } from '../types';
 import { generateId } from '../utils';
 import { useNav } from '../store/nav';
+import { useSyncStatus } from '../store/sync';
 
 const CATEGORIES: { key: MuscleGroup | 'all'; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -26,6 +27,7 @@ export function ExercisesPage() {
   const [selected, setSelected] = useState<Exercise | null>(null);
   const [form, setForm] = useState({ name: '', category: 'chest' as MuscleGroup, equipment: ['barbell'] as string[], notes: '' });
   const [prs, setPrs] = useState<Record<string, { weight?: number; e1rm?: number }>>({});
+  const lastSyncedAt = useSyncStatus(s => s.lastSyncedAt);
 
   async function reload() {
     const all = await db.exercises.toArray();
@@ -40,7 +42,7 @@ export function ExercisesPage() {
     setPrs(map);
   }
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { reload(); }, [lastSyncedAt]);
 
   const filtered = exercises.filter(e => {
     const matchQ = e.name.toLowerCase().includes(query.toLowerCase());

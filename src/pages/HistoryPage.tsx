@@ -4,6 +4,7 @@ import { db } from '../db';
 import type { Workout, Exercise } from '../types';
 import { formatDuration, calcWorkoutVolume, generateId } from '../utils';
 import { format, isToday, isYesterday, isThisWeek } from 'date-fns';
+import { useSyncStatus } from '../store/sync';
 
 function groupByDate(workouts: Workout[]): Record<string, Workout[]> {
   const groups: Record<string, Workout[]> = {};
@@ -25,6 +26,7 @@ export function HistoryPage() {
   const [exercises, setExercises] = useState<Record<string, Exercise>>({});
   const [selected, setSelected] = useState<Workout | null>(null);
   const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null);
+  const lastSyncedAt = useSyncStatus(s => s.lastSyncedAt);
 
   useEffect(() => {
     async function load() {
@@ -36,7 +38,7 @@ export function HistoryPage() {
       setExercises(map);
     }
     load();
-  }, []);
+  }, [lastSyncedAt]);
 
   const groups = groupByDate([...workouts].reverse());
 
