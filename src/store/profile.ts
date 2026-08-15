@@ -37,6 +37,14 @@ export const useProfile = create<ProfileState>()(
     }),
     {
       name: 'ironlog-profile',
+      // v0 -> v1: backfill updatedAt for profiles customized before that field existed,
+      // so their real values read as "customized" (and get pushed) instead of looking
+      // untouched forever just because they predate this field.
+      version: 1,
+      migrate: (persisted) => {
+        const state = persisted as ProfileState;
+        return { ...state, updatedAt: state.updatedAt || Date.now() };
+      },
     }
   )
 );

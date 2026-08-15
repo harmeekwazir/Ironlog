@@ -15,8 +15,14 @@ export async function pushProfile(userId: string) {
   const { updateProfile: _u, resetProfile: _r, ...fields } = useProfile.getState();
   if (!fields.updatedAt) return; // never edited locally — nothing to push
   const row = toRow({ ...fields, id: userId });
-  const { error } = await client.from('profiles').upsert(row);
+  // .select() to read back the server-assigned updated_at (a trigger overwrites
+  // whatever we send) so this device's own copy doesn't keep using its own clock.
+  const { data, error } = await client.from('profiles').upsert(row).select().maybeSingle();
   if (error) throw error;
+  if (data) {
+    const remote = fromRow<RemoteProfile>(data);
+    useProfile.setState({ updatedAt: remote.updatedAt });
+  }
 }
 
 interface RemoteProfile {
