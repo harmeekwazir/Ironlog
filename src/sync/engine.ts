@@ -1,3 +1,4 @@
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { db, type SyncQueueEntry, type SyncTableName } from '../db';
 import { useAuth } from '../store/auth';
@@ -9,7 +10,10 @@ import { pushProfile, pullProfile } from './profile';
 
 const PUSH_BATCH_SIZE = 50;
 const PULL_PAGE_SIZE = 500;
-const SYNC_INTERVAL_MS = 60_000;
+// Realtime (see subscribeRealtime below) is what makes sync near-instant; this interval
+// is just a fallback safety net in case a realtime event is missed or the socket drops.
+const SYNC_INTERVAL_MS = 3 * 60_000;
+const REALTIME_DEBOUNCE_MS = 800;
 
 function requireSupabase() {
   if (!supabase) throw new Error('Supabase is not configured');
@@ -187,6 +191,49 @@ function triggerSync() {
   void runSync(user.id);
 }
 
+let realtimeChannel: RealtimeChannel | null = null;
+let realtimeDebounceId: number | undefined;
+
+// Subscribes to Postgres Changes (Supabase's realtime feed off the WAL) for every
+// synced table, scoped to this user's own rows. Any insert/update/delete — from any
+// device — wakes up a sync almost immediately instead of waiting for the next poll.
+// Debounced because finishing a workout can touch several rows (the workout itself
+// plus any new PRs) in quick succession, which would otherwise fire several syncs back
+// to back for what's really one logical change.
+function subscribeRealtime(userId: string) {
+  if (!supabase) return;
+  unsubscribeRealtime();
+
+  const onChange = () => {
+    window.clearTimeout(realtimeDebounceId);
+    realtimeDebounceId = window.setTimeout(() => triggerSync(), REALTIME_DEBOUNCE_MS);
+  };
+
+  let channel = supabase.channel(`sync:${userId}`);
+  for (const table of Object.values(SUPABASE_TABLE)) {
+    channel = channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table, filter: `user_id=eq.${userId}` },
+      onChange,
+    );
+  }
+  channel = channel.on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
+    onChange,
+  );
+  channel.subscribe();
+  realtimeChannel = channel;
+}
+
+function unsubscribeRealtime() {
+  window.clearTimeout(realtimeDebounceId);
+  if (realtimeChannel) {
+    void realtimeChannel.unsubscribe();
+    realtimeChannel = null;
+  }
+}
+
 async function handleSignedIn(userId: string) {
   try {
     await ensureInitialSync(userId);
@@ -199,6 +246,7 @@ async function handleSignedIn(userId: string) {
   }
   triggerSync();
   startInterval();
+  subscribeRealtime(userId);
 }
 
 /** Manually kick off a sync — used by the "Sync now" button in Settings. */
@@ -231,6 +279,7 @@ export function startSyncEngine() {
     }
     if (state.status === 'signed-out' && previousUserId !== null) {
       stopInterval();
+      unsubscribeRealtime();
       useSyncStatus.setState({ status: 'idle', lastSyncedAt: null, error: null });
     }
     previousUserId = userId;
