@@ -204,7 +204,8 @@ function subscribeRealtime(userId: string) {
   if (!supabase) return;
   unsubscribeRealtime();
 
-  const onChange = () => {
+  const onChange = (payload: { table: string; eventType: string }) => {
+    console.log('[realtime] change received:', payload.table, payload.eventType);
     window.clearTimeout(realtimeDebounceId);
     realtimeDebounceId = window.setTimeout(() => triggerSync(), REALTIME_DEBOUNCE_MS);
   };
@@ -222,7 +223,9 @@ function subscribeRealtime(userId: string) {
     { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
     onChange,
   );
-  channel.subscribe();
+  channel.subscribe((status, err) => {
+    console.log('[realtime] subscription status:', status, err ?? '');
+  });
   realtimeChannel = channel;
 }
 
