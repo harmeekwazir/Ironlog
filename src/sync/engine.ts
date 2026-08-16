@@ -43,17 +43,14 @@ async function pushTable(userId: string, table: SyncTableName) {
       .filter((r): r is Record<string, unknown> => r != null)
       .map((r) => toRow({ ...r, userId }));
     if (rows.length === 0) continue;
-    // .select() so we get back the server-assigned updated_at (a trigger overwrites
-    // whatever we sent) and can write it back locally — otherwise this device's own
-    // copy would still carry its own clock's timestamp, defeating the point.
-    const { data, error } = await client.from(supaTable).upsert(rows).select();
+    // Deliberately not reading back the server-assigned updated_at here: the pull
+    // cursor is driven entirely by what the server returns during pullTable, never by
+    // this device's local copy, so there's nothing that actually depends on the local
+    // record matching the server's timestamp. Writing it back would mean touching a
+    // Dexie table the outbox hooks are watching, right after processing that table's
+    // own outbox — a needless feedback loop for no functional benefit.
+    const { error } = await client.from(supaTable).upsert(rows);
     if (error) throw error;
-    if (data && data.length) {
-      const updated = data.map((row) => fromRow<Record<string, unknown>>(row));
-      await withSyncSuppressed(async () => {
-        await db.table(table).bulkPut(updated);
-      });
-    }
   }
 
   for (const entry of deleteEntries) {
@@ -123,14 +120,8 @@ async function pushAll(userId: string) {
 
     for (let i = 0; i < records.length; i += PUSH_BATCH_SIZE) {
       const batch = records.slice(i, i + PUSH_BATCH_SIZE).map((r) => toRow({ ...r, userId }));
-      const { data, error } = await client.from(supaTable).upsert(batch).select();
+      const { error } = await client.from(supaTable).upsert(batch);
       if (error) throw error;
-      if (data && data.length) {
-        const updated = data.map((row) => fromRow<Record<string, unknown>>(row));
-        await withSyncSuppressed(async () => {
-          await db.table(table).bulkPut(updated);
-        });
-      }
     }
   }
   await pushProfile(userId);

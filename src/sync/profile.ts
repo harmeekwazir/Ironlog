@@ -10,10 +10,20 @@ function requireSupabase() {
 // Profile lives in a Zustand+localStorage store, not Dexie, so it doesn't go through the
 // outbox/hook pipeline the other tables use — it's a single row per user, so a plain
 // push-current-state / pull-and-compare-timestamps is simpler than routing it through Dexie.
+//
+// Tracks the updatedAt value we know the server already has, from either side of sync
+// (a push we just did, or a pull that just applied). Without this, pushProfile would
+// unconditionally re-upload on every sync cycle — including cycles triggered by
+// realtime notifying this same device about its own previous write — and since the
+// server trigger stamps a fresh updated_at on every write even for identical data,
+// that alone creates a new realtime event, which triggers another sync, forever.
+let lastSyncedUpdatedAt = 0;
+
 export async function pushProfile(userId: string) {
   const client = requireSupabase();
   const { updateProfile: _u, resetProfile: _r, ...fields } = useProfile.getState();
   if (!fields.updatedAt) return; // never edited locally — nothing to push
+  if (fields.updatedAt <= lastSyncedUpdatedAt) return; // already in sync, nothing new
   const row = toRow({ ...fields, id: userId });
   // .select() to read back the server-assigned updated_at (a trigger overwrites
   // whatever we send) so this device's own copy doesn't keep using its own clock.
@@ -21,6 +31,7 @@ export async function pushProfile(userId: string) {
   if (error) throw error;
   if (data) {
     const remote = fromRow<RemoteProfile>(data);
+    lastSyncedUpdatedAt = remote.updatedAt;
     useProfile.setState({ updatedAt: remote.updatedAt });
   }
 }
@@ -54,4 +65,5 @@ export async function pullProfile(userId: string) {
       updatedAt: remote.updatedAt,
     });
   }
+  lastSyncedUpdatedAt = Math.max(lastSyncedUpdatedAt, remote.updatedAt);
 }

@@ -1,20 +1,24 @@
 import { db, type SyncQueueEntry, type SyncTableName } from '../db';
 
-let suppressed = false;
+// A counter, not a boolean: if a suppressed call were ever nested inside another
+// (directly, or indirectly via an awaited call that itself suppresses), a boolean would
+// let the inner call's `finally` re-enable the outbox while the outer call is still
+// mid-flight, letting its remaining writes leak into the outbox.
+let suppressDepth = 0;
 
 // Wraps writes that merge remote (pulled) data into Dexie, so those writes don't get
 // queued straight back into the outbox they were just read from.
 export async function withSyncSuppressed<T>(fn: () => Promise<T>): Promise<T> {
-  suppressed = true;
+  suppressDepth++;
   try {
     return await fn();
   } finally {
-    suppressed = false;
+    suppressDepth--;
   }
 }
 
 function enqueue(entry: Omit<SyncQueueEntry, 'localId'>) {
-  if (suppressed) return;
+  if (suppressDepth > 0) return;
   void db.syncQueue.add(entry as SyncQueueEntry);
 }
 
