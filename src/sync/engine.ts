@@ -7,13 +7,14 @@ import { withSyncSuppressed } from './outbox';
 import { SYNC_TABLES, SUPABASE_TABLE } from './tables';
 import { toRow, fromRow } from './transform';
 import { pushProfile, pullProfile } from './profile';
+import { pushSettings, pullSettings } from './settings';
 
 const PUSH_BATCH_SIZE = 50;
 const PULL_PAGE_SIZE = 500;
 // Realtime (see subscribeRealtime below) is what makes sync near-instant; this interval
 // is just a fallback safety net in case a realtime event is missed or the socket drops.
 const SYNC_INTERVAL_MS = 3 * 60_000;
-const REALTIME_DEBOUNCE_MS = 800;
+const REALTIME_DEBOUNCE_MS = 500;
 
 function requireSupabase() {
   if (!supabase) throw new Error('Supabase is not configured');
@@ -125,6 +126,7 @@ async function pushAll(userId: string) {
     }
   }
   await pushProfile(userId);
+  await pushSettings(userId);
 }
 
 function initialSyncKey(userId: string) {
@@ -147,8 +149,10 @@ async function runSync(userId: string) {
   try {
     for (const table of SYNC_TABLES) await pushTable(userId, table);
     await pushProfile(userId);
+    await pushSettings(userId);
     for (const table of SYNC_TABLES) await pullTable(userId, table);
     await pullProfile(userId);
+    await pullSettings(userId);
     useSyncStatus.setState({ status: 'idle', lastSyncedAt: Date.now(), error: null });
   } catch (err) {
     console.error('[sync] runSync failed', err);
@@ -212,6 +216,11 @@ function subscribeRealtime(userId: string) {
   channel = channel.on(
     'postgres_changes',
     { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
+    onChange,
+  );
+  channel = channel.on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'settings', filter: `user_id=eq.${userId}` },
     onChange,
   );
   channel.subscribe((status, err) => {
