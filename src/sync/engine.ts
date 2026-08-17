@@ -69,43 +69,46 @@ async function pushTable(userId: string, table: SyncTableName) {
   await db.syncQueue.bulkDelete(entries.map((e) => e.localId!));
 }
 
-// Pulls everything changed since this table's watermark. Rows with a deleted_at
-// tombstone are applied as a local hard-delete instead of an upsert.
+// Pulls the user's *entire* current set of rows for this table and applies it locally —
+// deliberately not an incremental "only what's newer than my last cursor" fetch. An
+// earlier cursor-based version tracked a per-table watermark in db.syncMeta, but that
+// watermark turned out to be a recurring source of silent, hard-to-diagnose staleness
+// (get it stuck ahead of real data once — clock skew, a broken test run, anything — and
+// every future pull silently fetches nothing, forever, with no error). Profile/settings
+// sync never had this problem because they always fetch their one current row fresh.
+// Applying that same always-fetch-everything approach here trades some bandwidth
+// (irrelevant at personal-workout-history scale) for that same reliability: every pull
+// is a full, self-correcting resync, not a delta that can drift out of sync with reality.
+// Rows with a deleted_at tombstone are applied as a local hard-delete instead of an upsert.
 async function pullTable(userId: string, table: SyncTableName) {
   const client = requireSupabase();
   const supaTable = SUPABASE_TABLE[table];
-  const meta = await db.syncMeta.get(table);
-  let cursor = meta?.lastPulledAt ?? 0;
 
-  for (;;) {
+  const allRows: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += PULL_PAGE_SIZE) {
     const { data, error } = await client
       .from(supaTable)
       .select('*')
       .eq('user_id', userId)
-      .gt('updated_at', cursor)
-      .order('updated_at', { ascending: true })
-      .limit(PULL_PAGE_SIZE);
+      .range(from, from + PULL_PAGE_SIZE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
-
-    const toUpsert: Record<string, unknown>[] = [];
-    const toDelete: string[] = [];
-    for (const row of data as Record<string, unknown>[]) {
-      const record = fromRow<Record<string, unknown> & { id: string; deletedAt?: number }>(row);
-      if (record.deletedAt) toDelete.push(record.id);
-      else toUpsert.push(record);
-    }
-
-    await withSyncSuppressed(async () => {
-      if (toUpsert.length) await db.table(table).bulkPut(toUpsert);
-      if (toDelete.length) await db.table(table).bulkDelete(toDelete);
-    });
-
-    cursor = Math.max(...(data as Record<string, unknown>[]).map((row) => row.updated_at as number));
-    await db.syncMeta.put({ table, lastPulledAt: cursor });
-
+    allRows.push(...(data as Record<string, unknown>[]));
     if (data.length < PULL_PAGE_SIZE) break;
   }
+
+  const toUpsert: Record<string, unknown>[] = [];
+  const toDelete: string[] = [];
+  for (const row of allRows) {
+    const record = fromRow<Record<string, unknown> & { id: string; deletedAt?: number }>(row);
+    if (record.deletedAt) toDelete.push(record.id);
+    else toUpsert.push(record);
+  }
+
+  await withSyncSuppressed(async () => {
+    if (toUpsert.length) await db.table(table).bulkPut(toUpsert);
+    if (toDelete.length) await db.table(table).bulkDelete(toDelete);
+  });
 }
 
 // One-time upload of everything already on this device, run the first time a user
@@ -257,16 +260,22 @@ export function syncNow() {
   triggerSync();
 }
 
-// Resets each table's pull watermark so the next sync re-fetches everything from
-// scratch, and re-runs the one-time historical push too. Doesn't touch local data —
-// re-pulling/re-pushing is idempotent (upserts by id) — it just forgets "how far we've
-// already synced", which is the fix if that watermark ever got stuck ahead of real data
-// (e.g. from a broken test run) and is now silently filtering out legitimate rows.
+// Re-runs the one-time historical push directly (in case it never completed) and
+// triggers a fresh sync. Table pulls are already a full resync every time (see
+// pullTable), so this mainly matters for recovering a device whose initial upload
+// failed partway. Note: clearing the initial-sync flag alone wouldn't be enough —
+// that flag is only ever consulted from handleSignedIn, on an actual sign-in
+// transition, so a plain triggerSync() afterwards wouldn't have re-run the push.
 export async function forceFullResync() {
   const { status, user } = useAuth.getState();
   if (status !== 'signed-in' || !user) return;
-  await db.syncMeta.clear();
-  localStorage.removeItem(initialSyncKey(user.id));
+  try {
+    await pushAll(user.id);
+    localStorage.setItem(initialSyncKey(user.id), '1');
+  } catch (err) {
+    console.error('[sync] forceFullResync push failed', err);
+    useSyncStatus.setState({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+  }
   triggerSync();
 }
 
