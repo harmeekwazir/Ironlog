@@ -116,11 +116,12 @@ async function pullTable(userId: string, table: SyncTableName) {
 // writes going forward, so this bypasses the queue and reads local tables directly.
 async function pushAll(userId: string) {
   const client = requireSupabase();
-  for (const table of SYNC_TABLES) {
+
+  async function pushAllForTable(table: SyncTableName) {
     const supaTable = SUPABASE_TABLE[table];
     let records = (await db.table(table).toArray()) as Record<string, unknown>[];
     if (table === 'exercises') records = records.filter((r) => r.isCustom);
-    if (records.length === 0) continue;
+    if (records.length === 0) return;
 
     for (let i = 0; i < records.length; i += PUSH_BATCH_SIZE) {
       const batch = records.slice(i, i + PUSH_BATCH_SIZE).map((r) => toRow({ ...r, userId }));
@@ -128,8 +129,12 @@ async function pushAll(userId: string) {
       if (error) throw error;
     }
   }
-  await pushProfile(userId);
-  await pushSettings(userId);
+
+  await Promise.all([
+    ...SYNC_TABLES.map(pushAllForTable),
+    pushProfile(userId),
+    pushSettings(userId),
+  ]);
 }
 
 function initialSyncKey(userId: string) {
@@ -150,12 +155,19 @@ async function runSync(userId: string) {
   syncing = true;
   useSyncStatus.setState({ status: 'syncing', error: null });
   try {
-    for (const table of SYNC_TABLES) await pushTable(userId, table);
-    await pushProfile(userId);
-    await pushSettings(userId);
-    for (const table of SYNC_TABLES) await pullTable(userId, table);
-    await pullProfile(userId);
-    await pullSettings(userId);
+    // Push must fully finish before pull starts (so a pull can't clobber a local edit
+    // that hasn't reached the server yet), but within each phase every table is an
+    // independent request — no reason to wait for workouts before starting exercises.
+    await Promise.all([
+      ...SYNC_TABLES.map((table) => pushTable(userId, table)),
+      pushProfile(userId),
+      pushSettings(userId),
+    ]);
+    await Promise.all([
+      ...SYNC_TABLES.map((table) => pullTable(userId, table)),
+      pullProfile(userId),
+      pullSettings(userId),
+    ]);
     useSyncStatus.setState({ status: 'idle', lastSyncedAt: Date.now(), error: null });
   } catch (err) {
     console.error('[sync] runSync failed', err);
