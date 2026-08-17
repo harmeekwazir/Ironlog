@@ -3,7 +3,9 @@ import { supabase } from '../lib/supabase';
 import { db, type SyncQueueEntry, type SyncTableName } from '../db';
 import { useAuth } from '../store/auth';
 import { useSyncStatus } from '../store/sync';
-import { withSyncSuppressed } from './outbox';
+import { useProfile } from '../store/profile';
+import { useSettings } from '../store/settings';
+import { withSyncSuppressed, onLocalChange } from './outbox';
 import { SYNC_TABLES, SUPABASE_TABLE } from './tables';
 import { toRow, fromRow } from './transform';
 import { pushProfile, pullProfile } from './profile';
@@ -201,6 +203,19 @@ function triggerSync() {
   void runSync(user.id);
 }
 
+let localChangeDebounceId: number | undefined;
+
+// Fires whenever *this* device makes a local edit — a Dexie outbox write, or a
+// profile/settings store change (those don't go through the outbox at all, being
+// separate Zustand+localStorage stores). The edit itself is what should start the
+// flush timer, not just external signals like another device's realtime notification
+// or the fallback interval — without this, a change made here could sit local-only for
+// up to SYNC_INTERVAL_MS before anything pushed it.
+function scheduleSyncSoon() {
+  window.clearTimeout(localChangeDebounceId);
+  localChangeDebounceId = window.setTimeout(() => triggerSync(), REALTIME_DEBOUNCE_MS);
+}
+
 let realtimeChannel: RealtimeChannel | null = null;
 let realtimeDebounceId: number | undefined;
 
@@ -315,5 +330,13 @@ export function startSyncEngine() {
   window.addEventListener('online', () => triggerSync());
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') triggerSync();
+  });
+
+  onLocalChange(scheduleSyncSoon);
+  useProfile.subscribe((state, prevState) => {
+    if (state.updatedAt !== prevState.updatedAt) scheduleSyncSoon();
+  });
+  useSettings.subscribe((state, prevState) => {
+    if (state.updatedAt !== prevState.updatedAt) scheduleSyncSoon();
   });
 }

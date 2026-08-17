@@ -17,9 +17,23 @@ export async function withSyncSuppressed<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+// Notified whenever a genuine local change (not a suppressed pull-merge write) is
+// queued, so the sync engine can kick off a push immediately instead of only reacting
+// to remote realtime events, network/visibility changes, or the fallback timer — none
+// of which fire just because *this* device made an edit.
+type LocalChangeListener = () => void;
+const localChangeListeners = new Set<LocalChangeListener>();
+
+export function onLocalChange(listener: LocalChangeListener): () => void {
+  localChangeListeners.add(listener);
+  return () => localChangeListeners.delete(listener);
+}
+
 function enqueue(entry: Omit<SyncQueueEntry, 'localId'>) {
   if (suppressDepth > 0) return;
-  void db.syncQueue.add(entry as SyncQueueEntry);
+  void db.syncQueue.add(entry as SyncQueueEntry).then(() => {
+    for (const listener of localChangeListeners) listener();
+  });
 }
 
 // Registers per-table Dexie hooks that mirror every local create/update/delete into the
