@@ -1,6 +1,6 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { db, type SyncQueueEntry, type SyncTableName } from '../db';
+import { db, type SyncTableName } from '../db';
 import { useAuth } from '../store/auth';
 import { useSyncStatus } from '../store/sync';
 import { useProfile } from '../store/profile';
@@ -23,43 +23,56 @@ function requireSupabase() {
   return supabase;
 }
 
-// Drains the outbox for one table: every queued create/update collapses to a single
-// upsert of the record's *current* Dexie state (the queue only tracks which ids
-// changed, not payloads, so it's always the freshest state that gets pushed).
-// Deletes are pushed as a tombstone update, not a real delete — see migration notes.
-async function pushTable(userId: string, table: SyncTableName) {
+// Which tables have a real local change since they were last successfully pushed.
+// Seeded to "everything" on each sign-in (see handleSignedIn) so the first sync of a
+// session still uploads any pre-existing local-only data, then drained incrementally
+// as pushTableFull succeeds and refilled as outbox.ts reports genuine local edits.
+//
+// This gate is load-bearing, not an optimization: pushing an unchanged table would
+// still re-upsert every row, and the server trigger stamps a fresh updated_at on every
+// write regardless of whether the values actually differ — which would generate a
+// realtime event, which would trigger another sync, forever. Skipping the push when
+// there's nothing new is what keeps "sync on every change" from becoming "sync
+// constantly regardless of changes."
+let dirtyTables = new Set<SyncTableName>();
+
+// Pushes this table's *entire* current local state — not a diff against some "what
+// changed since last push" queue. An earlier version tracked pending upserts in an
+// outbox and only pushed those, but that diffing state was a repeated source of drift
+// (an edit that, for whatever reason, never made it into the queue correctly would just
+// silently never sync — the exact failure mode "Force full re-sync" was built to route
+// around by bypassing the queue entirely and pushing everything). Doing that on every
+// regular sync removes the class of bug rather than papering over the next instance of
+// it; the dirtyTables gate above is what keeps "every push is a full push" from also
+// meaning "every sync cycle writes, whether or not anything changed."
+//
+// Deletions are the one thing a full-table scan can't detect on its own — a deleted
+// record is, by definition, absent from "push everything currently here" — so pending
+// tombstones are read from the small delete-only queue outbox.ts maintains, independent
+// of the dirty flag (that queue is naturally empty when there's nothing to delete).
+async function pushTableFull(userId: string, table: SyncTableName) {
   const client = requireSupabase();
-  const entries = await db.syncQueue.where('table').equals(table).toArray();
-  if (entries.length === 0) return;
-
-  const latestByRecord = new Map<string, SyncQueueEntry>();
-  for (const entry of entries) latestByRecord.set(entry.recordId, entry);
-
   const supaTable = SUPABASE_TABLE[table];
-  const upsertEntries = [...latestByRecord.values()].filter((e) => e.op === 'upsert');
-  const deleteEntries = [...latestByRecord.values()].filter((e) => e.op === 'delete');
 
-  for (let i = 0; i < upsertEntries.length; i += PUSH_BATCH_SIZE) {
-    const batch = upsertEntries.slice(i, i + PUSH_BATCH_SIZE);
-    const records = await Promise.all(batch.map((e) => db.table(table).get(e.recordId)));
-    const rows = records
-      .filter((r): r is Record<string, unknown> => r != null)
-      .map((r) => toRow({ ...r, userId }));
-    if (rows.length === 0) continue;
-    // Deliberately not reading back the server-assigned updated_at here: the pull
-    // cursor is driven entirely by what the server returns during pullTable, never by
-    // this device's local copy, so there's nothing that actually depends on the local
-    // record matching the server's timestamp. Writing it back would mean touching a
-    // Dexie table the outbox hooks are watching, right after processing that table's
-    // own outbox — a needless feedback loop for no functional benefit.
-    const { error } = await client.from(supaTable).upsert(rows);
-    if (error) throw error;
+  if (dirtyTables.has(table)) {
+    let records = (await db.table(table).toArray()) as Record<string, unknown>[];
+    if (table === 'exercises') records = records.filter((r) => r.isCustom);
+
+    for (let i = 0; i < records.length; i += PUSH_BATCH_SIZE) {
+      const batch = records.slice(i, i + PUSH_BATCH_SIZE).map((r) => toRow({ ...r, userId }));
+      if (batch.length === 0) continue;
+      const { error } = await client.from(supaTable).upsert(batch);
+      if (error) throw error;
+    }
+    // Only cleared after every batch above succeeded — if any upsert throws, this line
+    // is never reached, so the table stays dirty and the next sync retries the push.
+    dirtyTables.delete(table);
   }
 
+  const deleteEntries = await db.syncQueue.where('table').equals(table).toArray();
   for (const entry of deleteEntries) {
-    // update(), not delete()/upsert(): a plain delete would leave other devices'
-    // pull cursor unable to see the change, and a full-row upsert would fail NOT NULL
-    // constraints for a record that was created and deleted before it ever synced.
+    // update(), not delete(): a plain delete would leave other devices' pull unable to
+    // see the change (they only ever see what's currently there, tombstone or not).
     const { error } = await client
       .from(supaTable)
       .update({ deleted_at: entry.updatedAt, updated_at: entry.updatedAt })
@@ -67,21 +80,12 @@ async function pushTable(userId: string, table: SyncTableName) {
       .eq('user_id', userId);
     if (error) throw error;
   }
-
-  await db.syncQueue.bulkDelete(entries.map((e) => e.localId!));
+  if (deleteEntries.length) await db.syncQueue.bulkDelete(deleteEntries.map((e) => e.localId!));
 }
 
-// Pulls the user's *entire* current set of rows for this table and applies it locally —
-// deliberately not an incremental "only what's newer than my last cursor" fetch. An
-// earlier cursor-based version tracked a per-table watermark in db.syncMeta, but that
-// watermark turned out to be a recurring source of silent, hard-to-diagnose staleness
-// (get it stuck ahead of real data once — clock skew, a broken test run, anything — and
-// every future pull silently fetches nothing, forever, with no error). Profile/settings
-// sync never had this problem because they always fetch their one current row fresh.
-// Applying that same always-fetch-everything approach here trades some bandwidth
-// (irrelevant at personal-workout-history scale) for that same reliability: every pull
-// is a full, self-correcting resync, not a delta that can drift out of sync with reality.
-// Rows with a deleted_at tombstone are applied as a local hard-delete instead of an upsert.
+// Pulls the user's entire current set of rows for this table and applies it locally —
+// same "always full, never an incremental diff" reasoning as the push side above; see
+// that comment. Rows with a deleted_at tombstone are applied as a local hard-delete.
 async function pullTable(userId: string, table: SyncTableName) {
   const client = requireSupabase();
   const supaTable = SUPABASE_TABLE[table];
@@ -113,43 +117,6 @@ async function pullTable(userId: string, table: SyncTableName) {
   });
 }
 
-// One-time upload of everything already on this device, run the first time a user
-// signs in — the outbox is empty for pre-existing records since hooks only fire on
-// writes going forward, so this bypasses the queue and reads local tables directly.
-async function pushAll(userId: string) {
-  const client = requireSupabase();
-
-  async function pushAllForTable(table: SyncTableName) {
-    const supaTable = SUPABASE_TABLE[table];
-    let records = (await db.table(table).toArray()) as Record<string, unknown>[];
-    if (table === 'exercises') records = records.filter((r) => r.isCustom);
-    if (records.length === 0) return;
-
-    for (let i = 0; i < records.length; i += PUSH_BATCH_SIZE) {
-      const batch = records.slice(i, i + PUSH_BATCH_SIZE).map((r) => toRow({ ...r, userId }));
-      const { error } = await client.from(supaTable).upsert(batch);
-      if (error) throw error;
-    }
-  }
-
-  await Promise.all([
-    ...SYNC_TABLES.map(pushAllForTable),
-    pushProfile(userId),
-    pushSettings(userId),
-  ]);
-}
-
-function initialSyncKey(userId: string) {
-  return `ironlog:initial-sync:${userId}`;
-}
-
-async function ensureInitialSync(userId: string) {
-  const key = initialSyncKey(userId);
-  if (localStorage.getItem(key)) return;
-  await pushAll(userId);
-  localStorage.setItem(key, '1');
-}
-
 let syncing = false;
 
 async function runSync(userId: string) {
@@ -161,7 +128,7 @@ async function runSync(userId: string) {
     // that hasn't reached the server yet), but within each phase every table is an
     // independent request — no reason to wait for workouts before starting exercises.
     await Promise.all([
-      ...SYNC_TABLES.map((table) => pushTable(userId, table)),
+      ...SYNC_TABLES.map((table) => pushTableFull(userId, table)),
       pushProfile(userId),
       pushSettings(userId),
     ]);
@@ -205,12 +172,12 @@ function triggerSync() {
 
 let localChangeDebounceId: number | undefined;
 
-// Fires whenever *this* device makes a local edit — a Dexie outbox write, or a
-// profile/settings store change (those don't go through the outbox at all, being
-// separate Zustand+localStorage stores). The edit itself is what should start the
-// flush timer, not just external signals like another device's realtime notification
-// or the fallback interval — without this, a change made here could sit local-only for
-// up to SYNC_INTERVAL_MS before anything pushed it.
+// Fires whenever *this* device makes a local edit — a Dexie write, or a
+// profile/settings store change (those don't go through Dexie at all, being separate
+// Zustand+localStorage stores). The edit itself is what should start the flush timer,
+// not just external signals like another device's realtime notification or the
+// fallback interval — without this, a change made here could sit local-only for up to
+// SYNC_INTERVAL_MS before anything pushed it.
 function scheduleSyncSoon() {
   window.clearTimeout(localChangeDebounceId);
   localChangeDebounceId = window.setTimeout(() => triggerSync(), REALTIME_DEBOUNCE_MS);
@@ -267,16 +234,12 @@ function unsubscribeRealtime() {
   }
 }
 
-async function handleSignedIn(userId: string) {
-  try {
-    await ensureInitialSync(userId);
-  } catch (err) {
-    // Don't let a failed one-time backfill permanently block ongoing sync — fall
-    // through to triggerSync()/startInterval() so the outbox can still drain and
-    // future edits keep syncing even if the historical upload needs a retry later.
-    console.error('[sync] initial sync failed', err);
-    useSyncStatus.setState({ status: 'error', error: err instanceof Error ? err.message : String(err) });
-  }
+function handleSignedIn(userId: string) {
+  // No separate "one-time historical upload" step needed anymore: marking every table
+  // dirty here means the first sync of this session pushes everything, same as any
+  // other push — there's nothing a special first-run path would do differently, and
+  // this also correctly re-seeds if a different user signs in during the same session.
+  dirtyTables = new Set(SYNC_TABLES);
   triggerSync();
   startInterval();
   subscribeRealtime(userId);
@@ -287,22 +250,14 @@ export function syncNow() {
   triggerSync();
 }
 
-// Re-runs the one-time historical push directly (in case it never completed) and
-// triggers a fresh sync. Table pulls are already a full resync every time (see
-// pullTable), so this mainly matters for recovering a device whose initial upload
-// failed partway. Note: clearing the initial-sync flag alone wouldn't be enough —
-// that flag is only ever consulted from handleSignedIn, on an actual sign-in
-// transition, so a plain triggerSync() afterwards wouldn't have re-run the push.
-export async function forceFullResync() {
-  const { status, user } = useAuth.getState();
-  if (status !== 'signed-in' || !user) return;
-  try {
-    await pushAll(user.id);
-    localStorage.setItem(initialSyncKey(user.id), '1');
-  } catch (err) {
-    console.error('[sync] forceFullResync push failed', err);
-    useSyncStatus.setState({ status: 'error', error: err instanceof Error ? err.message : String(err) });
-  }
+/**
+ * Like a normal sync, but forces every table to actually push its full state even if
+ * nothing local has changed since the last successful push — useful if a device's data
+ * is suspected to have drifted for some reason and you want to force-reconcile rather
+ * than wait for the next genuine edit.
+ */
+export function forceFullResync() {
+  dirtyTables = new Set(SYNC_TABLES);
   triggerSync();
 }
 
@@ -314,7 +269,7 @@ export function startSyncEngine() {
   useAuth.subscribe((state) => {
     const userId = state.user?.id ?? null;
     if (state.status === 'signed-in' && userId && userId !== previousUserId) {
-      void handleSignedIn(userId);
+      handleSignedIn(userId);
     }
     if (state.status === 'signed-out' && previousUserId !== null) {
       stopInterval();
@@ -325,14 +280,17 @@ export function startSyncEngine() {
   });
 
   const initial = useAuth.getState();
-  if (initial.status === 'signed-in' && initial.user) void handleSignedIn(initial.user.id);
+  if (initial.status === 'signed-in' && initial.user) handleSignedIn(initial.user.id);
 
   window.addEventListener('online', () => triggerSync());
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') triggerSync();
   });
 
-  onLocalChange(scheduleSyncSoon);
+  onLocalChange((table) => {
+    dirtyTables.add(table);
+    scheduleSyncSoon();
+  });
   useProfile.subscribe((state, prevState) => {
     if (state.updatedAt !== prevState.updatedAt) scheduleSyncSoon();
   });
