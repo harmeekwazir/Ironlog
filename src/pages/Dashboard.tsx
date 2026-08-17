@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, AlertTriangle, ArrowRight, BatteryCharging, CalendarDays, ChevronRight,
-  Dumbbell, FileText, Flame, Gauge, Settings2, ShieldCheck, TrendingUp, User, Zap,
+  Clock, Dumbbell, FileText, Flame, Gauge, Settings2, ShieldCheck, TrendingUp, User, Zap,
 } from 'lucide-react';
-import { eachDayOfInterval, format, isToday, startOfDay, subDays } from 'date-fns';
+import { eachDayOfInterval, format, formatDistanceToNow, isToday, startOfDay, subDays } from 'date-fns';
 import { db } from '../db';
 import { useActiveWorkout } from '../store/activeWorkout';
 import { useNav } from '../store/nav';
 import { useSyncStatus } from '../store/sync';
-import type { Exercise, MuscleSplit, OverloadSuggestion, PersonalRecord, ReadinessCheck, WeeklyReport, Workout } from '../types';
+import type { Exercise, IndividualMuscle, MuscleSplit, OverloadSuggestion, PersonalRecord, ReadinessCheck, WeeklyReport, Workout } from '../types';
 import {
-  calcWorkoutVolume, formatDuration, getAcwr, getMuscleRecovery,
+  calcMuscleStress, calcWorkoutVolume, formatDuration, getAcwr, getMuscleRecovery,
   getOverloadSuggestions, getReadinessLabel, getWeeklyReport, MUSCLE_LABELS, MUSCLE_SPLITS, SPLIT_LABELS,
 } from '../utils';
+import { BottomSheet } from '../components/common/BottomSheet';
 import frontSvgRaw from '../assets/front.svg?raw';
 import backSvgRaw from '../assets/Back.svg?raw';
 
@@ -195,7 +196,7 @@ export function Dashboard() {
 
         <ConsistencyGrid workouts={workouts} />
 
-        <BodyHeatmap muscleRecovery={muscleRecovery} />
+        <BodyHeatmap muscleRecovery={muscleRecovery} workouts={workouts} exercises={exercises} />
 
         {/* Progressive overload — only renders when there's training history */}
         {suggestions.length > 0 && (
@@ -336,9 +337,9 @@ function OverloadCard({ suggestion: s }: { suggestion: OverloadSuggestion }) {
   );
 }
 
-type MuscleRecoveryItem = { muscle: import('../types').IndividualMuscle; stress: number; fitness: number; recovery: number; hoursUntilReady: number };
+type MuscleRecoveryItem = { muscle: IndividualMuscle; stress: number; fitness: number; recovery: number; hoursUntilReady: number };
 
-const FRONT_IDS: Partial<Record<import('../types').IndividualMuscle, string[]>> = {
+const FRONT_IDS: Partial<Record<IndividualMuscle, string[]>> = {
   chest:       ['chest'],
   front_delts: ['shoulder-front-delts'],
   side_delts:  ['shoulder-side-delts'],
@@ -353,7 +354,7 @@ const FRONT_IDS: Partial<Record<import('../types').IndividualMuscle, string[]>> 
   glutes:      ['glutes-adductors'],
 };
 
-const BACK_IDS: Partial<Record<import('../types').IndividualMuscle, string[]>> = {
+const BACK_IDS: Partial<Record<IndividualMuscle, string[]>> = {
   rear_delts: ['shoulder-rear-delts'],
   side_delts: ['shoulder-side-delts'],
   triceps:    ['triceps'],
@@ -366,6 +367,20 @@ const BACK_IDS: Partial<Record<import('../types').IndividualMuscle, string[]>> =
   calves:     ['calves'],
   abs:        ['abs-obliques'],
 };
+
+// Reverse lookup so a click anywhere on either SVG can resolve back to the muscle it
+// represents. The muscle-region id sits on an outer <g>, but the painted <path>
+// elements are nested several levels deeper inside their own decorative <g id="Vector_
+// NN"> wrappers — so a plain closest('[id]') stops at the nearest of those decorative
+// ids instead of reaching the muscle region. REGION_SELECTOR below targets only the
+// known region ids specifically, skipping over everything in between.
+const ID_TO_MUSCLE = new Map<string, IndividualMuscle>();
+for (const idsMap of [FRONT_IDS, BACK_IDS]) {
+  for (const [muscle, ids] of Object.entries(idsMap) as [IndividualMuscle, string[]][]) {
+    for (const id of ids) ID_TO_MUSCLE.set(id, muscle);
+  }
+}
+const REGION_SELECTOR = [...ID_TO_MUSCLE.keys()].map(id => `#${CSS.escape(id)}`).join(',');
 
 const HEATMAP_REGIONS = (Object.keys(MUSCLE_SPLITS) as MuscleSplit[]).map(split => ({
   label: SPLIT_LABELS[split],
@@ -397,38 +412,85 @@ function hmColor(r: number): string {
   return `rgb(${mix(r1, r2)},${mix(g1, g2)},${mix(b1, b2)})`;
 }
 
+function formatHoursUntilReady(hours: number): string {
+  if (hours <= 0) return 'Ready now';
+  if (hours < 24) return `Ready in ${hours}h`;
+  const days = Math.floor(hours / 24);
+  const rem = hours % 24;
+  return `Ready in ${days}d${rem ? ` ${rem}h` : ''}`;
+}
+
 function colorSvg(
   raw: string,
-  idsMap: Partial<Record<import('../types').IndividualMuscle, string[]>>,
-  byMuscle: Partial<Record<import('../types').IndividualMuscle, MuscleRecoveryItem>>,
+  idsMap: Partial<Record<IndividualMuscle, string[]>>,
+  byMuscle: Partial<Record<IndividualMuscle, MuscleRecoveryItem>>,
+  selectedMuscle: IndividualMuscle | null,
 ): string {
   const NEUTRAL = '#374151';
   const colorMap = new Map<string, string>();
   for (const ids of Object.values(idsMap)) {
     if (ids) for (const id of ids) colorMap.set(id, NEUTRAL);
   }
-  for (const [muscle, ids] of Object.entries(idsMap) as [import('../types').IndividualMuscle, string[]][]) {
+  for (const [muscle, ids] of Object.entries(idsMap) as [IndividualMuscle, string[]][]) {
     if (!ids?.length) continue;
     const item = byMuscle[muscle];
     const color = item ? hmColor(item.recovery) : NEUTRAL;
     for (const id of ids) colorMap.set(id, color);
   }
-  const rules = [...colorMap.entries()].map(
-    ([id, color]) => `#${id},#${id} path,#${id} ellipse,#${id} rect,#${id} circle{fill:${color}}`,
-  );
+  const selectedIds = new Set(selectedMuscle ? idsMap[selectedMuscle] ?? [] : []);
+
+  // Source art draws every shape twice — a filled shape plus a separate stroke-only
+  // outline path tracing the same lines. These two blanket rules (lower specificity
+  // than the #id ones below, so the per-muscle fills still win) give every part of the
+  // body a consistent dark look by default: unmapped regions (background anatomy we
+  // have no recovery data for — traps, neck, etc.) go flat black instead of the source
+  // art's light gray, and every outline stroke goes white so the line work still reads
+  // against that black.
+  const baseRules = [
+    'path[fill]:not([fill="none"]),ellipse[fill]:not([fill="none"]),rect[fill]:not([fill="none"]),circle[fill]:not([fill="none"]){fill:#000}',
+    'path[stroke],ellipse[stroke],rect[stroke],circle[stroke]{stroke:#fff;stroke-opacity:.75;stroke-width:1.5px;vector-effect:non-scaling-stroke}',
+  ];
+
+  const rules = [...colorMap.entries()].map(([id, color]) => {
+    const selector = `#${id},#${id} path,#${id} ellipse,#${id} rect,#${id} circle`;
+    const highlight = selectedIds.has(id) ? 'stroke:#fff;stroke-width:3px;stroke-opacity:1;' : '';
+    return `${selector}{fill:${color};fill-opacity:.7;${highlight}cursor:pointer;transition:filter .15s ease}${selector}:hover{filter:brightness(1.25)}`;
+  });
   const sized = raw
     .replace(/(\s)width="[^"]*"/, '$1width="100%"')
     .replace(/\sheight="[^"]*"/, '');
-  return sized.replace(/(<svg[^>]*>)/, `$1<style>${rules.join('')}</style>`);
+  return sized.replace(/(<svg[^>]*>)/, `$1<style>${[...baseRules, ...rules].join('')}</style>`);
 }
 
-function BodyHeatmap({ muscleRecovery }: { muscleRecovery: MuscleRecoveryItem[] }) {
+function BodyHeatmap({ muscleRecovery, workouts, exercises }: { muscleRecovery: MuscleRecoveryItem[]; workouts: Workout[]; exercises: Record<string, Exercise> }) {
+  const [selectedMuscle, setSelectedMuscle] = useState<IndividualMuscle | null>(null);
+  const [hover, setHover] = useState<{ muscle: IndividualMuscle; x: number; y: number; side: 'front' | 'back' } | null>(null);
+  // Capability check, not a screen-size guess: a touch device sometimes fires a
+  // synthetic mousemove right after a tap, which would otherwise leave a tooltip
+  // stuck on screen after the finger has already lifted.
+  const supportsHover = useMemo(
+    () => typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches,
+    [],
+  );
+
   const byMuscle = useMemo(
-    () => Object.fromEntries(muscleRecovery.map(m => [m.muscle, m])) as Partial<Record<import('../types').IndividualMuscle, MuscleRecoveryItem>>,
+    () => Object.fromEntries(muscleRecovery.map(m => [m.muscle, m])) as Partial<Record<IndividualMuscle, MuscleRecoveryItem>>,
     [muscleRecovery],
   );
-  const frontHtml = useMemo(() => colorSvg(frontSvgRaw, FRONT_IDS, byMuscle), [byMuscle]);
-  const backHtml  = useMemo(() => colorSvg(backSvgRaw, BACK_IDS, byMuscle), [byMuscle]);
+  const lastTrainedAt = useMemo(() => {
+    const map: Partial<Record<IndividualMuscle, number>> = {};
+    for (const w of workouts) {
+      if (!w.completedAt) continue;
+      const stressMap = calcMuscleStress(w, exercises);
+      for (const muscle of Object.keys(stressMap) as IndividualMuscle[]) {
+        if (!map[muscle] || w.completedAt > map[muscle]!) map[muscle] = w.completedAt;
+      }
+    }
+    return map;
+  }, [workouts, exercises]);
+
+  const frontHtml = useMemo(() => colorSvg(frontSvgRaw, FRONT_IDS, byMuscle, selectedMuscle), [byMuscle, selectedMuscle]);
+  const backHtml  = useMemo(() => colorSvg(backSvgRaw, BACK_IDS, byMuscle, selectedMuscle), [byMuscle, selectedMuscle]);
 
   const readyCount = muscleRecovery.filter(m => m.recovery >= 75).length;
   const fatiguedCount = muscleRecovery.filter(m => m.recovery < 45).length;
@@ -446,6 +508,30 @@ function BodyHeatmap({ muscleRecovery }: { muscleRecovery: MuscleRecoveryItem[] 
     : readyRegions.length === HEATMAP_REGIONS.length
     ? 'Full body ready'
     : readyRegions.join(' · ') + ' recommended';
+
+  function handleSvgClick(e: React.MouseEvent<HTMLDivElement>) {
+    const el = (e.target as Element).closest(REGION_SELECTOR);
+    if (!el) return;
+    const muscle = ID_TO_MUSCLE.get(el.id);
+    if (muscle) setSelectedMuscle(muscle);
+  }
+
+  function handleSvgMouseMove(side: 'front' | 'back') {
+    return (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!supportsHover) return;
+      const el = (e.target as Element).closest(REGION_SELECTOR);
+      const muscle = el ? ID_TO_MUSCLE.get(el.id) : undefined;
+      if (!muscle) { setHover(null); return; }
+      const rect = e.currentTarget.getBoundingClientRect();
+      setHover({ muscle, x: e.clientX - rect.left, y: e.clientY - rect.top, side });
+    };
+  }
+
+  function clearHover() {
+    if (supportsHover) setHover(null);
+  }
+
+  const selectedItem = selectedMuscle ? byMuscle[selectedMuscle] : undefined;
 
   return (
     <section className="rounded-[28px] border border-iron-800 bg-iron-900 p-4">
@@ -469,22 +555,134 @@ function BodyHeatmap({ muscleRecovery }: { muscleRecovery: MuscleRecoveryItem[] 
           <span>Recovering</span>
           <span>Ready</span>
         </div>
-        <div className="mt-1.5 flex justify-center">
-          <span className="flex items-center gap-1.5 text-[10px] text-iron-500"><i className="inline-block h-2 w-2 rounded-full bg-[#374151]" />No data yet</span>
+      </div>
+
+      <p className="mt-3 text-[10px] font-bold uppercase tracking-wider text-iron-600">Tap a muscle for details</p>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="relative">
+          <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-iron-500">Front</p>
+          <div
+            onClick={handleSvgClick}
+            onMouseMove={handleSvgMouseMove('front')}
+            onMouseLeave={clearHover}
+            dangerouslySetInnerHTML={{ __html: frontHtml }}
+            className="w-full"
+          />
+          {hover?.side === 'front' && <MuscleTooltip hover={hover} byMuscle={byMuscle} />}
+        </div>
+        <div className="relative">
+          <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-iron-500">Back</p>
+          <div
+            onClick={handleSvgClick}
+            onMouseMove={handleSvgMouseMove('back')}
+            onMouseLeave={clearHover}
+            dangerouslySetInnerHTML={{ __html: backHtml }}
+            className="w-full"
+          />
+          {hover?.side === 'back' && <MuscleTooltip hover={hover} byMuscle={byMuscle} />}
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <div>
-          <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-iron-500">Front</p>
-          <div dangerouslySetInnerHTML={{ __html: frontHtml }} className="w-full" />
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {muscleRecovery.map(m => (
+          <button
+            key={m.muscle}
+            onClick={() => setSelectedMuscle(m.muscle)}
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold transition-colors ${
+              selectedMuscle === m.muscle ? 'border-white/40 bg-iron-800' : 'border-iron-800 bg-iron-950 hover:border-iron-700'
+            }`}
+          >
+            <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: hmColor(m.recovery) }} />
+            <span className="text-iron-300">{MUSCLE_LABELS[m.muscle]}</span>
+            <span className="text-iron-500">{m.recovery}%</span>
+          </button>
+        ))}
+      </div>
+
+      {selectedMuscle && (
+        <MuscleDetailSheet
+          muscle={selectedMuscle}
+          item={selectedItem}
+          lastTrainedAt={lastTrainedAt[selectedMuscle]}
+          onClose={() => setSelectedMuscle(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+function MuscleTooltip({
+  hover, byMuscle,
+}: {
+  hover: { muscle: IndividualMuscle; x: number; y: number };
+  byMuscle: Partial<Record<IndividualMuscle, MuscleRecoveryItem>>;
+}) {
+  const recovery = byMuscle[hover.muscle]?.recovery ?? 0;
+  const color = hmColor(recovery);
+  return (
+    <div
+      className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg border border-iron-700 bg-iron-950 px-2.5 py-1.5 text-[11px] font-bold shadow-xl"
+      style={{ left: hover.x, top: hover.y - 10 }}
+    >
+      <span className="text-white">{MUSCLE_LABELS[hover.muscle]}</span>
+      <span className="ml-1.5" style={{ color }}>{recovery}%</span>
+    </div>
+  );
+}
+
+function MuscleDetailSheet({
+  muscle, item, lastTrainedAt, onClose,
+}: {
+  muscle: IndividualMuscle;
+  item?: MuscleRecoveryItem;
+  lastTrainedAt?: number;
+  onClose: () => void;
+}) {
+  const recovery = item?.recovery ?? 0;
+  const color = hmColor(recovery);
+  const status = recovery >= 75 ? 'Ready to train' : recovery >= 45 ? 'Recovering' : 'Fatigued';
+  const advice = recovery >= 75
+    ? `${MUSCLE_LABELS[muscle]} is fully recovered — a great candidate for today's session.`
+    : recovery >= 45
+    ? `${MUSCLE_LABELS[muscle]} is partway recovered. Training it now works, but expect reduced output.`
+    : `${MUSCLE_LABELS[muscle]} is still fatigued. Give it more time before training it hard again.`;
+
+  return (
+    <BottomSheet onClose={onClose}>
+      <div className="flex items-center gap-3">
+        <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl" style={{ background: `${color}22` }}>
+          <ShieldCheck size={20} style={{ color }} />
         </div>
         <div>
-          <p className="mb-1 text-center text-[10px] font-bold uppercase tracking-wider text-iron-500">Back</p>
-          <div dangerouslySetInnerHTML={{ __html: backHtml }} className="w-full" />
+          <p className="text-xs font-bold uppercase tracking-wider" style={{ color }}>{status}</p>
+          <h2 className="text-xl font-black text-white">{MUSCLE_LABELS[muscle]}</h2>
         </div>
       </div>
-    </section>
+
+      <div className="mt-5 flex items-end gap-2">
+        <span className="text-5xl font-black tracking-tighter" style={{ color }}>{recovery}%</span>
+        <span className="pb-1 text-sm font-bold text-iron-500">recovered</span>
+      </div>
+      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-iron-800">
+        <div className="h-full rounded-full" style={{ width: `${recovery}%`, background: color }} />
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-2">
+        <div className="rounded-2xl border border-iron-800 bg-iron-950/60 p-3">
+          <Clock size={14} className="text-iron-500" />
+          <p className="mt-2 text-sm font-black text-white">{formatHoursUntilReady(item?.hoursUntilReady ?? 0)}</p>
+          <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-iron-600">Until ready</p>
+        </div>
+        <div className="rounded-2xl border border-iron-800 bg-iron-950/60 p-3">
+          <CalendarDays size={14} className="text-iron-500" />
+          <p className="mt-2 text-sm font-black text-white">{lastTrainedAt ? formatDistanceToNow(lastTrainedAt, { addSuffix: true }) : 'Never'}</p>
+          <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-iron-600">Last trained</p>
+        </div>
+      </div>
+
+      <p className="mt-4 text-sm leading-relaxed text-iron-400">{advice}</p>
+    </BottomSheet>
   );
 }
 
