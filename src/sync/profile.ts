@@ -22,10 +22,9 @@ let lastSyncedUpdatedAt = 0;
 
 export async function pushProfile(userId: string) {
   const client = requireSupabase();
-  const state = useProfile.getState();
-  if (!state.updatedAt || state.updatedAt <= lastSyncedUpdatedAt) return;
-  const { updateProfile: _u, resetProfile: _r, ...fields } = state;
-  const row = toRow({ ...fields, id: userId });
+  const { weightKg, heightCm, age, goal, activityLevel, notes, updatedAt, fieldUpdatedAt } = useProfile.getState();
+  if (!updatedAt || updatedAt <= lastSyncedUpdatedAt) return;
+  const row = toRow({ weightKg, heightCm, age, goal, activityLevel, notes, updatedAt, fieldUpdatedAt, id: userId });
   // .select() to read back the server-assigned updated_at (a trigger overwrites
   // whatever we send) so this device's own copy doesn't keep using its own clock.
   const { data, error } = await client.from('profiles').upsert(row).select().maybeSingle();

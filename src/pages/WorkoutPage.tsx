@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Check, ChevronDown, ChevronUp, CopyPlus, Gauge,
+  Check, ChevronDown, ChevronUp, CopyPlus, Gauge, Mic,
   Pencil, Play, Plus, Save, Sparkles, Trash2, Trophy,
 } from 'lucide-react';
 import { useActiveWorkout } from '../store/activeWorkout';
@@ -9,6 +9,7 @@ import { useNav } from '../store/nav';
 import { ExercisePicker } from '../components/common/ExercisePicker';
 import { BottomSheet } from '../components/common/BottomSheet';
 import { ReadinessSheet } from '../components/common/ReadinessSheet';
+import { VoiceLoggerSheet } from '../components/common/VoiceLoggerSheet';
 import { db } from '../db';
 import type { Exercise, ReadinessCheck, SetType, Workout, WorkoutSet, WorkoutTemplate } from '../types';
 import { estimate1RM, formatDuration, generateId, getSetTypeBadgeColor, getSetTypeLabel } from '../utils';
@@ -40,6 +41,7 @@ export function WorkoutPage() {
   } = useActiveWorkout();
   const { setPage } = useNav();
   const [showPicker, setShowPicker] = useState(false);
+  const [showVoiceLogger, setShowVoiceLogger] = useState(false);
   const [exercises, setExercises] = useState<Record<string, Exercise>>({});
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
   const [editName, setEditName] = useState(false);
@@ -262,6 +264,9 @@ export function WorkoutPage() {
               <span className="rounded-full bg-volt-400/10 px-1.5 py-0.5 text-[10px] font-bold text-volt-300">×{workout.recoveryMultiplier}</span>
             </div>
           </div>
+          <button onClick={() => setShowVoiceLogger(true)} className="p-2.5 rounded-xl bg-iron-800 text-iron-300" aria-label="Log by voice">
+            <Mic size={17} />
+          </button>
           <button onClick={() => { setTemplateName(workout.name); setShowSaveTemplate(true); }} className="p-2.5 rounded-xl bg-iron-800 text-iron-300" aria-label="Save template">
             <Save size={17} />
           </button>
@@ -342,6 +347,8 @@ export function WorkoutPage() {
       </div>
 
       {showPicker && <ExercisePicker onSelect={id => { addExercise(id); setExpanded(previous => new Set([...previous, workout.exercises.length])); setShowPicker(false); }} onClose={() => setShowPicker(false)} />}
+
+      {showVoiceLogger && <VoiceLoggerSheet exercises={exercises} onClose={() => setShowVoiceLogger(false)} />}
 
       {showSaveTemplate && (
         <BottomSheet onClose={() => setShowSaveTemplate(false)}>

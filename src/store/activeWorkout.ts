@@ -33,6 +33,7 @@ interface ActiveWorkoutState {
   removeExercise: (exerciseIndex: number) => void;
   reorderExercises: (from: number, to: number) => void;
   addSet: (exerciseIndex: number, type?: WorkoutSet['type']) => void;
+  logVoiceSets: (exerciseId: string, sets: { weight: number; reps: number; type: WorkoutSet['type'] }[]) => void;
   removeSet: (exerciseIndex: number, setIndex: number) => void;
   updateSet: (exerciseIndex: number, setIndex: number, updates: Partial<WorkoutSet>) => void;
   completeSet: (exerciseIndex: number, setIndex: number) => void;
@@ -136,6 +137,31 @@ export const useActiveWorkout = create<ActiveWorkoutState>()(
           completed: false,
         };
         exercise.sets = [...exercise.sets, newSet];
+        exercises[exerciseIndex] = exercise;
+        set({ workout: { ...workout, exercises } });
+      },
+
+      logVoiceSets: (exerciseId, sets) => {
+        const { workout } = get();
+        if (!workout || sets.length === 0) return;
+        const exercises = [...workout.exercises];
+        let exerciseIndex = exercises.findIndex(e => e.exerciseId === exerciseId);
+
+        if (exerciseIndex === -1) {
+          exercises.push({ id: generateId(), exerciseId, sets: [], order: exercises.length });
+          exerciseIndex = exercises.length - 1;
+        }
+
+        const exercise = { ...exercises[exerciseIndex] };
+        const newSets: WorkoutSet[] = sets.map(s => ({
+          id: generateId(),
+          type: s.type,
+          weight: s.weight,
+          reps: s.reps,
+          restSeconds: SET_TYPE_REST_SECONDS[s.type],
+          completed: false,
+        }));
+        exercise.sets = [...exercise.sets, ...newSets];
         exercises[exerciseIndex] = exercise;
         set({ workout: { ...workout, exercises } });
       },
